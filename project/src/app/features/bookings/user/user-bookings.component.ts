@@ -11,6 +11,11 @@ import { PaginationComponent } from '../../../shared/ui/pagination/pagination.co
 import { BookingsService } from '../../../core/services/bookings.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { formatPrice, formatDateShort, getDaysDifference } from '../../../core/utils/validation.utils';
+import { forkJoin, of } from 'rxjs';
+import { switchMap, map, catchError } from 'rxjs/operators';
+import { ListingsService } from '../../../core/services/listings.service';
+
+
 import type { Booking, BookingFilters } from '../../../core/models/booking.model';
 
 @Component({
@@ -217,11 +222,13 @@ import type { Booking, BookingFilters } from '../../../core/models/booking.model
     </app-modal>
   `
 })
+
+
 export class UserBookingsComponent implements OnInit {
   filtersForm: FormGroup;
   bookings: Booking[] = [];
   loading = true;
-  
+
   currentPage = 1;
   pageSize = 10;
   totalResults = 0;
@@ -230,9 +237,31 @@ export class UserBookingsComponent implements OnInit {
   cancelLoading = false;
   bookingToCancel: Booking | null = null;
 
+  private mapApiToEs(api: string): Booking['estado'] {
+    const m: Record<string, Booking['estado']> = {
+      PENDING: 'PENDIENTE',
+      CONFIRMED: 'CONFIRMADA',
+      PAID: 'CONFIRMADA',      // el back puede usar PAID; en UI lo mostramos como confirmada
+      CANCELED: 'CANCELADA',
+      COMPLETED: 'COMPLETADA'
+    };
+    return m[api] ?? (api as Booking['estado']);
+  }
+
+  private mapEsToApi(es: string): string | undefined {
+    const m: Record<Booking['estado'], string> = {
+      PENDIENTE: 'PENDING',
+      CONFIRMADA: 'CONFIRMED',
+      CANCELADA: 'CANCELED',
+      COMPLETADA: 'COMPLETED'
+    };
+    return (es as Booking['estado']) in m ? m[es as Booking['estado']] : undefined;
+  }
+
   constructor(
     private fb: FormBuilder,
     private bookingsService: BookingsService,
+    private listingsService: ListingsService,
     private toastService: ToastService
   ) {
     this.filtersForm = this.fb.group({
@@ -248,17 +277,73 @@ export class UserBookingsComponent implements OnInit {
 
   loadBookings(): void {
     this.loading = true;
+
+    // Tomamos los filtros del form y convertimos el estado a lo que espera el backend
+    const f = this.filtersForm.value;
+    const estadoApi = f.estado ? this.mapEsToApi(f.estado) : undefined;
+
     const filters: BookingFilters = {
-      ...this.filtersForm.value,
+      ...f,
+      estado: estadoApi,   // BookingsService enviará ?status=...
       propias: true
     };
 
-    this.bookingsService.getBookings(filters, this.currentPage, this.pageSize).subscribe(response => {
-      this.bookings = response.items;
-      this.totalResults = response.total;
-      this.loading = false;
+    this.bookingsService.getBookings(filters, this.currentPage, this.pageSize).pipe(
+      // Enriquecer cada reserva con info del alojamiento y normalizar estado a español
+      switchMap((response) => {
+        const items = response.items || [];
+        if (!items.length) {
+          this.totalResults = response.total;
+          return of([] as Booking[]);
+        }
+
+        const perItem$ = items.map((b) =>
+          forkJoin({
+            acc: this.listingsService.getListingById(b.alojamientoId)
+              .pipe(catchError(() => of(null))),
+            img: this.listingsService.getMainImageUrl(b.alojamientoId)
+              .pipe(catchError(() => of('')))
+          }).pipe(
+            map(({ acc, img }) => {
+              const alojamiento = acc
+                ? {
+                  titulo: acc.titulo,
+                  ciudad: acc.ciudad,
+                  precioNoche: acc.precioNoche,
+                  imagenPrincipal: img || undefined
+                }
+                : b.alojamiento; // fallback
+
+              return {
+                ...b,
+                estado: this.mapApiToEs(String(b.estado)), // normaliza a español para la UI
+                alojamiento
+              } as Booking;
+            })
+          )
+        );
+
+        // devolvemos el arreglo enriquecido
+        return forkJoin(perItem$).pipe(
+          map((enriched) => {
+            this.totalResults = response.total;
+            return enriched;
+          })
+        );
+      })
+    ).subscribe({
+      next: (enriched) => {
+        this.bookings = enriched;
+        this.loading = false;
+      },
+      error: (err) => {
+        console.error(err);
+        this.bookings = [];
+        this.loading = false;
+      }
     });
   }
+
 
   applyFilters(): void {
     this.currentPage = 1;
@@ -274,11 +359,11 @@ export class UserBookingsComponent implements OnInit {
     if (booking.estado !== 'PENDIENTE' && booking.estado !== 'CONFIRMADA') {
       return false;
     }
-    
+
     const checkInDate = new Date(booking.checkIn);
     const now = new Date();
     const hoursUntilCheckIn = (checkInDate.getTime() - now.getTime()) / (1000 * 60 * 60);
-    
+
     return hoursUntilCheckIn >= 48;
   }
 
@@ -290,7 +375,7 @@ export class UserBookingsComponent implements OnInit {
   cancelBooking(): void {
     if (this.bookingToCancel && !this.cancelLoading) {
       this.cancelLoading = true;
-      
+
       this.bookingsService.cancelBooking(this.bookingToCancel.id).subscribe({
         next: () => {
           this.cancelLoading = false;

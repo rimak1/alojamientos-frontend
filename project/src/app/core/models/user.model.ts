@@ -5,8 +5,8 @@ export interface User {
   telefono: string;
   rol: 'USUARIO' | 'ANFITRION';
   fechaNacimiento: string;
-  fotoUrl?: string;
   descripcion?: string;
+  fotoUrl?: string;
 }
 
 export interface LoginRequest {
@@ -41,4 +41,13 @@ export interface ResetPasswordRequest {
 export interface ChangePasswordRequest {
   passwordActual: string;
   nuevaPassword: string;
+}
+export interface RequestPasswordReset {
+  email: string;
+}
+export interface VerifyPasswordReset {
+  email: string;
+  code: string;
+  newPassword: string;
+  confirmPassword: string;
 }

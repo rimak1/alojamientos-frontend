@@ -199,7 +199,7 @@ export class HostListingsComponent implements OnInit {
     public router: Router,
     private listingsService: ListingsService,
     private toastService: ToastService
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadListings();
@@ -208,7 +208,7 @@ export class HostListingsComponent implements OnInit {
   loadListings(): void {
     this.loading = true;
     this.listingsService.getHostListings().subscribe(listings => {
-      this.listings = listings.filter(listing => listing.estado !== 'ELIMINADO');
+      this.listings = (listings || []).filter(l => l.estado !== 'ELIMINADO');
       this.loading = false;
     });
   }
@@ -229,7 +229,7 @@ export class HostListingsComponent implements OnInit {
   deleteListing(): void {
     if (this.listingToDelete && !this.deleteLoading) {
       this.deleteLoading = true;
-      
+
       this.listingsService.deleteListing(this.listingToDelete.id).subscribe({
         next: () => {
           this.deleteLoading = false;

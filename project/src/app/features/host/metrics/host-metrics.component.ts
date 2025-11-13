@@ -5,58 +5,36 @@ import { HeaderComponent } from '../../../shared/layout/header/header.component'
 import { ButtonComponent } from '../../../shared/ui/button/button.component';
 import { CardComponent } from '../../../shared/ui/card/card.component';
 import { formatPrice } from '../../../core/utils/validation.utils';
-
-interface MetricData {
-  totalReservas: number;
-  ingresosTotales: number;
-  ratingPromedio: number;
-  ocupacionPromedio: number;
-  reservasPorMes: { mes: string; reservas: number; ingresos: number }[];
-}
+import { MetricsService, type MetricData } from '../../../core/services/metrics.service';
+import { ToastService } from '../../../core/services/toast.service';
 
 @Component({
   selector: 'app-host-metrics',
   standalone: true,
-  imports: [
-    CommonModule,
-    ReactiveFormsModule,
-    HeaderComponent,
-    ButtonComponent,
-    CardComponent
-  ],
+  imports: [CommonModule, ReactiveFormsModule, HeaderComponent, ButtonComponent, CardComponent],
   template: `
     <app-header></app-header>
 
     <div class="bg-base min-h-screen py-8">
       <div class="container mx-auto px-4">
         <div class="max-w-6xl mx-auto space-y-8">
-          <!-- Header -->
           <div class="text-center">
             <h1 class="text-3xl font-bold text-ink">Métricas y Estadísticas</h1>
             <p class="text-gray-600 mt-2">Analiza el rendimiento de tus alojamientos</p>
           </div>
 
-          <!-- Date filters -->
           <app-card title="Filtros de fecha">
             <form [formGroup]="dateForm" (ngSubmit)="loadMetrics()" class="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label class="block text-sm font-medium text-ink mb-2">Desde</label>
-                <input
-                  type="date"
-                  formControlName="desde"
-                  class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50"
-                />
+                <input type="date" formControlName="desde"
+                       class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50" />
               </div>
-
               <div>
                 <label class="block text-sm font-medium text-ink mb-2">Hasta</label>
-                <input
-                  type="date"
-                  formControlName="hasta"
-                  class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50"
-                />
+                <input type="date" formControlName="hasta"
+                       class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50" />
               </div>
-
               <div class="flex items-end">
                 <app-button type="submit" variant="primary" fullWidth [loading]="loading">
                   Actualizar métricas
@@ -65,7 +43,6 @@ interface MetricData {
             </form>
           </app-card>
 
-          <!-- Loading state -->
           <div *ngIf="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div *ngFor="let item of [1,2,3,4]" class="animate-pulse">
               <app-card>
@@ -77,13 +54,11 @@ interface MetricData {
             </div>
           </div>
 
-          <!-- Metrics cards -->
           <div *ngIf="!loading && metrics" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <app-card class="text-center">
               <div class="space-y-2">
                 <div class="w-12 h-12 mx-auto bg-primary bg-opacity-10 rounded-2xl flex items-center justify-center">
                   <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3a4 4 0 118 0v4m-4 9a3 3 0 100-6 3 3 0 000 6z"></path>
                   </svg>
                 </div>
@@ -129,14 +104,10 @@ interface MetricData {
             </app-card>
           </div>
 
-          <!-- Monthly chart -->
           <app-card title="Reservas por mes" *ngIf="!loading && metrics">
             <div class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div 
-                  *ngFor="let monthData of metrics.reservasPorMes" 
-                  class="bg-gray-50 rounded-xl p-4 text-center"
-                >
+                <div *ngFor="let monthData of metrics.reservasPorMes" class="bg-gray-50 rounded-xl p-4 text-center">
                   <h4 class="font-medium text-ink mb-2">{{ monthData.mes }}</h4>
                   <div class="space-y-1">
                     <p class="text-lg font-bold text-primary">{{ monthData.reservas }} reservas</p>
@@ -157,11 +128,13 @@ export class HostMetricsComponent implements OnInit {
   loading = true;
 
   constructor(
-    private fb: FormBuilder
+    private fb: FormBuilder,
+    private metricsService: MetricsService,
+    private toast: ToastService
   ) {
     const today = new Date();
     const threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, today.getDate());
-    
+
     this.dateForm = this.fb.group({
       desde: [threeMonthsAgo.toISOString().split('T')[0]],
       hasta: [today.toISOString().split('T')[0]]
@@ -174,22 +147,19 @@ export class HostMetricsComponent implements OnInit {
 
   loadMetrics(): void {
     this.loading = true;
-    
-    // Mock metrics data
-    setTimeout(() => {
-      this.metrics = {
-        totalReservas: 24,
-        ingresosTotales: 2150,
-        ratingPromedio: 4.6,
-        ocupacionPromedio: 78,
-        reservasPorMes: [
-          { mes: 'Enero 2025', reservas: 8, ingresos: 720 },
-          { mes: 'Diciembre 2024', reservas: 12, ingresos: 1080 },
-          { mes: 'Noviembre 2024', reservas: 4, ingresos: 350 }
-        ]
-      };
-      this.loading = false;
-    }, 1000);
+    const { desde, hasta } = this.dateForm.value;
+
+    this.metricsService.getHostMetrics(desde, hasta).subscribe({
+      next: (m) => {
+        this.metrics = m;
+        this.loading = false;
+      },
+      error: (err) => {
+        console.error(err);
+        this.toast.showError('No se pudieron cargar las métricas');
+        this.loading = false;
+      }
+    });
   }
 
   formatPrice = formatPrice;

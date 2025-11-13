@@ -56,6 +56,20 @@ import { isValidEmail } from '../../../core/utils/validation.utils';
               required
             ></app-input>
 
+            <div class="grid grid-cols-2 gap-2">
+  <label class="flex items-center gap-2 p-3 rounded-xl border cursor-pointer"
+         [class.border-primary]="loginForm.value.rol === 'USUARIO'">
+    <input type="radio" class="hidden" [value]="'USUARIO'" formControlName="rol">
+    <span>Usuario</span>
+  </label>
+
+  <label class="flex items-center gap-2 p-3 rounded-xl border cursor-pointer"
+         [class.border-primary]="loginForm.value.rol === 'ANFITRION'">
+    <input type="radio" class="hidden" [value]="'ANFITRION'" formControlName="rol">
+    <span>Anfitrión</span>
+  </label>
+</div>
+
             <app-button
               type="submit"
               variant="primary"
@@ -63,6 +77,7 @@ import { isValidEmail } from '../../../core/utils/validation.utils';
               fullWidth
               [disabled]="loginForm.invalid"
               [loading]="loading"
+              (clicked)="onSubmit()" 
             >
               Iniciar Sesión
             </app-button>
@@ -86,19 +101,6 @@ import { isValidEmail } from '../../../core/utils/validation.utils';
               </a>
             </div>
           </div>
-
-          <!-- Demo accounts -->
-          <div class="mt-6 pt-6 border-t border-gray-100">
-            <p class="text-xs text-gray-500 text-center mb-3">Cuentas de demo:</p>
-            <div class="grid grid-cols-2 gap-2">
-              <app-button variant="ghost" size="sm" (clicked)="fillDemoUser()">
-                Usuario Demo
-              </app-button>
-              <app-button variant="ghost" size="sm" (clicked)="fillDemoHost()">
-                Anfitrión Demo
-              </app-button>
-            </div>
-          </div>
         </app-card>
       </div>
     </div>
@@ -114,10 +116,13 @@ export class LoginComponent implements OnInit {
     private toastService: ToastService,
     private router: Router
   ) {
+    // login.component.ts (constructor)
     this.loginForm = this.fb.group({
       email: ['', [Validators.required, this.emailValidator]],
-      password: ['', [Validators.required, Validators.minLength(6)]]
+      password: ['', [Validators.required, Validators.minLength(6)]],
+      rol: ['USUARIO', Validators.required]  // <- selector
     });
+
   }
 
   ngOnInit(): void {
@@ -128,22 +133,32 @@ export class LoginComponent implements OnInit {
   }
 
   onSubmit(): void {
-    if (this.loginForm.valid && !this.loading) {
-      this.loading = true;
-      
-      this.authService.login(this.loginForm.value).subscribe({
-        next: (response) => {
-          this.loading = false;
-          this.toastService.showSuccess('¡Bienvenido de vuelta!');
-          this.router.navigate(['/']);
-        },
-        error: (error) => {
-          this.loading = false;
-          this.toastService.showError('Email o contraseña incorrectos');
-        }
-      });
+    if (this.loginForm.invalid || this.loading) {
+      this.loginForm.markAllAsTouched();
+      return;
     }
+    this.loading = true;
+    const { email, password, rol } = this.loginForm.value;
+
+    const login$ = rol === 'ANFITRION'
+      ? this.authService.loginHost({ email, password })
+      : this.authService.loginGuest({ email, password });
+
+    login$.subscribe({
+      next: (user) => {
+        this.loading = false;
+        this.toastService.showSuccess(`¡Bienvenido de vuelta, ${user.nombre}!`);
+        this.router.navigate(['/']);
+      },
+      error: (err) => {
+        this.loading = false;
+        console.error(err);
+        this.toastService.showError('Email o contraseña incorrectos');
+      }
+    });
   }
+
+
 
   getFieldError(fieldName: string): string {
     const field = this.loginForm.get(fieldName);

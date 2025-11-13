@@ -67,7 +67,7 @@ export const routes: Routes = [
         loadComponent: () => import('./features/bookings/host/host-bookings.component').then(m => m.HostBookingsComponent)
       },
       {
-        path: 'metricas',
+        path: 'anfitrion/metricas',
         loadComponent: () => import('./features/host/metrics/host-metrics.component').then(m => m.HostMetricsComponent)
       }
     ]

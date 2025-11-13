@@ -17,6 +17,9 @@ import { ToastService } from '../../../core/services/toast.service';
 import { formatPrice, formatDate, getDaysDifference } from '../../../core/utils/validation.utils';
 import type { Listing } from '../../../core/models/listing.model';
 import type { Review } from '../../../core/models/review.model';
+import type { CreateReviewRequest } from '../../../core/models/review.model';
+
+
 
 @Component({
   selector: 'app-listing-detail',
@@ -136,6 +139,58 @@ import type { Review } from '../../../core/models/review.model';
                   <p class="text-gray-600">Aún no hay reseñas para este alojamiento</p>
                 </div>
               </ng-template>
+              <hr class="my-6 border-gray-100">
+
+<div *ngIf="canReview; else loginToReview">
+  <h4 class="text-lg font-semibold text-ink mb-4">Deja tu reseña</h4>
+
+  <form [formGroup]="reviewForm" (ngSubmit)="onSubmitReview()" class="space-y-4">
+  <!-- Dentro del formulario de reseña -->
+<div class="space-y-2">
+  <label class="block text-sm font-medium text-ink mb-1">Tu valoración</label>
+  <app-star-rating
+    [rating]="reviewForm.get('rating')?.value"
+    (ratingChange)="reviewForm.get('rating')?.setValue($event)"
+  ></app-star-rating>
+</div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-2">Puntuación</label>
+      <select
+        formControlName="rating"
+        class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        <option *ngFor="let r of [1,2,3,4,5]" [value]="r">{{ r }} estrella(s)</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-2">Comentario</label>
+      <textarea
+        formControlName="texto"
+        rows="4"
+        class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+        placeholder="Cuenta tu experiencia..."
+      ></textarea>
+    </div>
+
+    <app-button
+      type="submit"
+      variant="primary"
+      [disabled]="reviewForm.invalid || submittingReview"
+      [loading]="submittingReview"
+    >
+      Enviar reseña
+    </app-button>
+  </form>
+</div>
+
+<ng-template #loginToReview>
+  <p class="text-sm text-gray-600 mt-4">
+    Inicia sesión como huésped para dejar una reseña.
+  </p>
+</ng-template>
+
             </app-card>
           </div>
 
@@ -251,7 +306,9 @@ export class ListingDetailComponent implements OnInit {
   bookingLoading = false;
   occupiedDates: string[] = [];
   calendarDays: any[] = [];
-
+  reviewForm: FormGroup;
+  submittingReview = false;
+  reservaId: string | null = null;
   constructor(
     private fb: FormBuilder,
     private route: ActivatedRoute,
@@ -261,16 +318,38 @@ export class ListingDetailComponent implements OnInit {
     private reviewsService: ReviewsService,
     private authService: AuthService,
     private toastService: ToastService
+
+
+
   ) {
     this.bookingForm = this.fb.group({
       checkIn: ['', Validators.required],
       checkOut: ['', Validators.required],
       huespedes: [1, [Validators.required, Validators.min(1)]]
     });
+    this.reviewForm = this.fb.group({
+      rating: [5, [Validators.required, Validators.min(1), Validators.max(5)]],
+      texto: ['', [Validators.required, Validators.minLength(10)]]
+    });
   }
+  get canReview(): boolean {
+    const user = this.authService.getCurrentUser();
+
+    if (!user || !this.listing) return false;
+
+    // Solo huéspedes, no el anfitrión del alojamiento
+    return user.rol === 'USUARIO' && String(user.id) !== this.listing.anfitrionId;
+  }
+
+
 
   ngOnInit(): void {
     const listingId = this.route.snapshot.paramMap.get('id');
+
+    this.route.queryParams.subscribe(params => {
+      this.reservaId = params['reservaId'] ?? null;
+    });
+
     if (listingId) {
       this.loadListing(listingId);
       this.loadReviews(listingId);
@@ -280,6 +359,7 @@ export class ListingDetailComponent implements OnInit {
     this.generateCalendar();
   }
 
+
   get isAuthenticated(): boolean {
     return this.authService.isAuthenticated();
   }
@@ -287,7 +367,7 @@ export class ListingDetailComponent implements OnInit {
   get totalNights(): number {
     const checkIn = this.bookingForm.get('checkIn')?.value;
     const checkOut = this.bookingForm.get('checkOut')?.value;
-    
+
     if (checkIn && checkOut) {
       return getDaysDifference(checkIn, checkOut);
     }
@@ -319,7 +399,7 @@ export class ListingDetailComponent implements OnInit {
   }
 
   loadOccupiedDates(alojamientoId: string): void {
-    this.bookingsService.getOccupiedDates(alojamientoId).subscribe(dates => {
+    this.bookingsService.getOccupiedDates(alojamientoId).subscribe((dates: string[]) => {
       this.occupiedDates = dates;
       this.generateCalendar();
     });
@@ -333,7 +413,7 @@ export class ListingDetailComponent implements OnInit {
 
     if (this.bookingForm.valid && this.listing && !this.bookingLoading) {
       this.bookingLoading = true;
-      
+
       const bookingData = {
         alojamientoId: this.listing.id,
         ...this.bookingForm.value
@@ -375,12 +455,12 @@ export class ListingDetailComponent implements OnInit {
   private generateCalendar(): void {
     const today = new Date();
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-    
+
     this.calendarDays = [];
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(today.getFullYear(), today.getMonth(), day);
       const dateString = date.toISOString().split('T')[0];
-      
+
       this.calendarDays.push({
         day,
         dateString,
@@ -392,17 +472,76 @@ export class ListingDetailComponent implements OnInit {
 
   getCalendarDayClasses(day: any): string {
     const baseClasses = 'h-8 flex items-center justify-center rounded text-xs';
-    
+
     if (day.isPast) {
       return `${baseClasses} bg-gray-100 text-gray-400`;
     }
-    
+
     if (day.isOccupied) {
       return `${baseClasses} bg-red-100 text-red-600`;
     }
-    
+
     return `${baseClasses} bg-green-100 text-green-600 hover:bg-green-200 cursor-pointer`;
   }
+  onSubmitReview(): void {
+    if (!this.isAuthenticated) {
+      this.router.navigate(['/auth/login'], {
+        queryParams: { redirectTo: this.router.url }
+      });
+      return;
+    }
+
+    if (!this.listing) {
+      this.toastService.showError('Alojamiento no cargado');
+      return;
+    }
+
+    if (!this.reservaId) {
+      this.toastService.showError('No se encontró la reserva asociada para valorar');
+      return;
+    }
+
+    if (this.reviewForm.invalid || this.submittingReview) {
+      this.reviewForm.markAllAsTouched();
+      return;
+    }
+
+    this.submittingReview = true;
+
+    const formValue = this.reviewForm.value;
+
+    const payload: CreateReviewRequest = {
+      alojamientoId: this.listing.id,
+      reservaId: this.reservaId,       // 👈 AHORA SÍ
+      rating: formValue.rating,
+      texto: formValue.texto
+    };
+
+    this.reviewsService.createReview(payload).subscribe({
+      next: (review: Review) => {
+        this.submittingReview = false;
+        this.toastService.showSuccess('¡Gracias por tu reseña!');
+
+        // meter la nueva reseña en la lista
+        this.reviews = [review, ...this.reviews];
+
+        // recalcular rating promedio
+        if (this.listing) {
+          const total = this.reviews.reduce((acc, r) => acc + r.rating, 0);
+          this.listing.ratingPromedio = total / this.reviews.length;
+        }
+
+        this.reviewForm.reset({ rating: 5, texto: '' });
+      },
+      error: (err) => {
+        console.error(err);
+        this.submittingReview = false;
+        this.toastService.showError('No se pudo enviar la reseña');
+      }
+    });
+  }
+
+
 
   formatPrice = formatPrice;
   formatDate = formatDate;

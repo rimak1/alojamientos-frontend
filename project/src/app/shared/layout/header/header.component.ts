@@ -37,16 +37,14 @@ import type { User } from '../../../core/models/user.model';
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                 </svg>
               </button>
-              
-              <!-- Dropdown -->
               <div class="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-medium border border-gray-100 py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                 <a routerLink="/anfitrion/alojamientos" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
                   Mis Alojamientos
                 </a>
-                <a routerLink="/anfitrion/reservas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
+                <a routerLink="/anfitrion/reservas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duración-200">
                   Reservas
                 </a>
-                <a routerLink="/anfitrion/metricas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
+                <a routerLink="/anfitrion/metricas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duración-200">
                   Métricas
                 </a>
               </div>
@@ -78,14 +76,19 @@ import type { User } from '../../../core/models/user.model';
                   </svg>
                 </button>
 
-                <!-- User dropdown -->
                 <div class="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-medium border border-gray-100 py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                   <a routerLink="/perfil" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
                     Mi Perfil
                   </a>
-                  <a routerLink="/reservas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
+
+                  <!-- Redirige a reservas correctas según rol -->
+                  <a
+                    [routerLink]="currentUser?.rol === 'ANFITRION' ? '/anfitrion/reservas' : '/reservas'"
+                    class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200"
+                  >
                     Mis Reservas
                   </a>
+
                   <a routerLink="/auth/change-password" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
                     Cambiar Contraseña
                   </a>
@@ -112,9 +115,12 @@ export class HeaderComponent implements OnInit, OnDestroy {
   constructor(
     private authService: AuthService,
     public router: Router
-  ) {}
+  ) { }
 
   ngOnInit(): void {
+    // Render inmediato con lo que haya en storage
+    this.currentUser = this.authService.getCurrentUser();
+    // Y mantener sincronizado con futuros cambios
     this.subscription = this.authService.currentUser$.subscribe(user => {
       this.currentUser = user;
     });
@@ -125,7 +131,13 @@ export class HeaderComponent implements OnInit, OnDestroy {
   }
 
   logout(): void {
-    this.authService.logout();
-    this.router.navigate(['/']);
+    this.authService.logout().subscribe({
+      next: () => this.router.navigate(['/']),
+      error: () => {
+        // Si el backend falla, limpiamos sesión local igualmente
+        this.authService.forceLocalLogout();
+        this.router.navigate(['/']);
+      }
+    });
   }
 }

@@ -8,7 +8,7 @@ export function isValidEmail(email: string): boolean {
 
 /**
  * Validar fortaleza de contraseña
- * Mínimo 8 caracteres, al menos una mayúscula y un número
+ * Mínimo 8 caracteres, al menos una mayúscula y un número (regla del proyecto)
  */
 export function isValidPassword(password: string): boolean {
   const passwordRegex = /^(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
@@ -16,15 +16,32 @@ export function isValidPassword(password: string): boolean {
 }
 
 /**
- * Validar número de teléfono español
+ * Validar número de teléfono colombiano
+ * Acepta:
+ *  - Móviles: 10 dígitos iniciando por 3 (e.g., 3XXXXXXXXX)
+ *  - Fijos: esquema actual 60 + código área (1 dígito) + 7 dígitos (e.g., 601XXXXXXX)
+ * Opcionalmente con prefijo de país +57, 57 o 0057, y separadores espacios/guiones/paréntesis.
  */
 export function isValidPhone(phone: string): boolean {
-  const phoneRegex = /^(\+34|0034|34)?[ -]?[6789][ -]?([0-9][ -]?){8}$/;
-  return phoneRegex.test(phone.replace(/\s/g, ''));
+  // quitar espacios, guiones y paréntesis
+  let cleaned = phone.replace(/[\s\-()]/g, '');
+
+  // normalizar prefijo internacional colombiano
+  if (cleaned.startsWith('+57')) cleaned = cleaned.slice(3);
+  else if (cleaned.startsWith('0057')) cleaned = cleaned.slice(4);
+  else if (cleaned.startsWith('57')) cleaned = cleaned.slice(2);
+
+  // móviles: 3 + 9 dígitos (total 10)
+  const mobileRegex = /^3\d{9}$/;
+
+  // fijos: 60 + [1-8] + 7 dígitos (total 10)
+  const landlineRegex = /^60[1-8]\d{7}$/;
+
+  return mobileRegex.test(cleaned) || landlineRegex.test(cleaned);
 }
 
 /**
- * Validar que el usuario sea mayor de edad
+ * Validar que el usuario sea mayor de edad (≥ 18 años)
  */
 export function isValidAge(birthDate: string): boolean {
   const today = new Date();
@@ -39,12 +56,16 @@ export function isValidAge(birthDate: string): boolean {
 }
 
 /**
- * Formatear precio
+ * Formatear precio en pesos colombianos (COP)
  * @param price Monto a formatear
- * @param locale Locale opcional (por defecto 'es-ES')
- * @param currency Moneda opcional (por defecto 'EUR')
+ * @param locale Locale opcional (por defecto 'es-CO')
+ * @param currency Moneda opcional (por defecto 'COP')
  */
-export function formatPrice(price: number, locale: string = 'es-ES', currency: string = 'EUR'): string {
+export function formatPrice(
+  price: number,
+  locale: string = 'es-CO',
+  currency: string = 'COP'
+): string {
   return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency
@@ -52,13 +73,13 @@ export function formatPrice(price: number, locale: string = 'es-ES', currency: s
 }
 
 /* ============================
- * Utilidades de fecha pedidas
+ * Utilidades de fecha 
  * ============================ */
 
 /**
- * Formatea una fecha a DD/MM/AAAA (dependiendo del locale)
+ * Formatea una fecha a DD/MM/AAAA respetando el locale (por defecto 'es-CO')
  */
-export function formatDate(iso: string | Date, locale: string = 'es-ES'): string {
+export function formatDate(iso: string | Date, locale: string = 'es-CO'): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso;
   if (isNaN(d.getTime())) return '';
   return d.toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -67,10 +88,9 @@ export function formatDate(iso: string | Date, locale: string = 'es-ES'): string
 /**
  * Formatea una fecha corta, p. ej. "02 sept"
  */
-export function formatDateShort(iso: string | Date, locale: string = 'es-ES'): string {
+export function formatDateShort(iso: string | Date, locale: string = 'es-CO'): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso;
   if (isNaN(d.getTime())) return '';
-  // month: 'short' -> ene, feb, mar...
   return d.toLocaleDateString(locale, { month: 'short', day: '2-digit' });
 }
 

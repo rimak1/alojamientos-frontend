@@ -1,4 +1,5 @@
-import { Component, OnInit } from '@angular/core';
+// src/app/features/auth/reset/reset-password.component.ts
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -12,14 +13,7 @@ import { isValidPassword } from '../../../core/utils/validation.utils';
 @Component({
   selector: 'app-reset-password',
   standalone: true,
-  imports: [
-    CommonModule,
-    RouterModule,
-    ReactiveFormsModule,
-    ButtonComponent,
-    InputComponent,
-    CardComponent
-  ],
+  imports: [CommonModule, RouterModule, ReactiveFormsModule, ButtonComponent, InputComponent, CardComponent],
   template: `
     <div class="min-h-screen bg-base flex items-center justify-center py-12 px-4">
       <div class="w-full max-w-md">
@@ -36,7 +30,6 @@ import { isValidPassword } from '../../../core/utils/validation.utils';
         </div>
 
         <app-card>
-          <!-- Countdown timer -->
           <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-center">
             <p class="text-sm text-blue-800">
               Código válido por: <span class="font-mono font-semibold">{{ formatTime(timeRemaining) }}</span>
@@ -100,10 +93,7 @@ import { isValidPassword } from '../../../core/utils/validation.utils';
             </app-button>
 
             <div>
-              <a
-                routerLink="/auth/forgot"
-                class="text-sm text-primary hover:text-primary-600 transition-colors duration-200"
-              >
+              <a routerLink="/auth/forgot" class="text-sm text-primary hover:text-primary-600 transition-colors duration-200">
                 ← Solicitar nuevo código
               </a>
             </div>
@@ -113,11 +103,11 @@ import { isValidPassword } from '../../../core/utils/validation.utils';
     </div>
   `
 })
-export class ResetPasswordComponent implements OnInit {
+export class ResetPasswordComponent implements OnInit, OnDestroy {
   resetForm: FormGroup;
   loading = false;
-  timeRemaining = 15 * 60; // 15 minutes in seconds
-  private timer?: number;
+  timeRemaining = 15 * 60;
+  private timer?: ReturnType<typeof setInterval>;
 
   constructor(
     private fb: FormBuilder,
@@ -126,71 +116,82 @@ export class ResetPasswordComponent implements OnInit {
     private toastService: ToastService,
     private router: Router
   ) {
-    this.resetForm = this.fb.group({
-      email: ['', [Validators.required]],
-      codigo: ['', [Validators.required, Validators.pattern(/^\d{6}$/)]],
-      nuevaPassword: ['', [Validators.required, this.passwordValidator]],
-      confirmPassword: ['', Validators.required]
-    }, { validators: this.passwordMatchValidator });
+    this.resetForm = this.fb.group(
+      {
+        email: ['', [Validators.required, Validators.email]],
+        codigo: ['', [Validators.required, Validators.pattern(/^\d{6}$/)]],
+        nuevaPassword: ['', [Validators.required, this.passwordValidator]],
+        confirmPassword: ['', Validators.required]
+      },
+      { validators: this.passwordMatchValidator }
+    );
   }
 
   ngOnInit(): void {
-    // Pre-fill email from query params
-    this.route.queryParams.subscribe(params => {
-      if (params['email']) {
-        this.resetForm.patchValue({ email: params['email'] });
-      }
-    });
-
+    const qpEmail = this.route.snapshot.queryParamMap.get('email');
+    if (qpEmail) this.resetForm.patchValue({ email: qpEmail });
     this.startCountdown();
   }
 
   ngOnDestroy(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-    }
+    if (this.timer) clearInterval(this.timer);
   }
 
   onSubmit(): void {
-    if (this.resetForm.valid && !this.loading && this.timeRemaining > 0) {
-      this.loading = true;
-      
-      const { confirmPassword, ...resetData } = this.resetForm.value;
-      
-      this.authService.resetPassword(resetData).subscribe({
-        next: () => {
-          this.loading = false;
-          this.toastService.showSuccess('¡Contraseña restablecida exitosamente!');
-          this.router.navigate(['/auth/login']);
-        },
-        error: (error) => {
-          this.loading = false;
-          this.toastService.showError('Código inválido o expirado');
-        }
-      });
+    if (this.resetForm.invalid || this.loading || this.timeRemaining <= 0) {
+      this.resetForm.markAllAsTouched();
+      return;
     }
+
+    this.loading = true;
+
+    // Mapear nombres del form -> DTO del backend (VerifyPasswordResetDto)
+    const { email, codigo, nuevaPassword, confirmPassword } = this.resetForm.value;
+    const payload = {
+      email,
+      code: codigo,
+      newPassword: nuevaPassword,
+      confirmPassword
+    };
+
+    this.authService.resetPassword(payload).subscribe({
+      next: () => {
+        this.loading = false;
+        this.toastService.showSuccess('¡Contraseña restablecida exitosamente!');
+        this.router.navigate(['/auth/login']);
+      },
+      error: () => {
+        this.loading = false;
+        this.toastService.showError('Código inválido o expirado');
+      }
+    });
   }
 
   resendCode(): void {
     const email = this.resetForm.get('email')?.value;
-    if (email) {
-      this.authService.forgotPassword({ email }).subscribe({
-        next: () => {
-          this.toastService.showSuccess('Código reenviado');
-          this.timeRemaining = 15 * 60;
-          this.startCountdown();
-        },
-        error: () => {
-          this.toastService.showError('Error al reenviar código');
-        }
-      });
+    if (!email) {
+      this.resetForm.get('email')?.markAsTouched();
+      this.toastService.showWarning('Ingresa tu email para reenviar el código');
+      return;
     }
+
+    this.authService.forgotPassword({ email }).subscribe({
+      next: () => {
+        this.toastService.showSuccess('Código reenviado');
+        this.timeRemaining = 15 * 60;
+        this.startCountdown();
+      },
+      error: () => {
+        this.toastService.showError('Error al reenviar código');
+      }
+    });
   }
 
   getFieldError(fieldName: string): string {
     const field = this.resetForm.get(fieldName);
     if (field?.errors && field.touched) {
       if (field.errors['required']) return `${this.getFieldLabel(fieldName)} es obligatorio`;
+      if (field.errors['email']) return 'Email no válido';
       if (field.errors['pattern'] && fieldName === 'codigo') return 'Código debe tener 6 dígitos';
       if (field.errors['password']) return 'Contraseña debe tener al menos 8 caracteres, una mayúscula y un número';
       if (field.errors['passwordMismatch']) return 'Las contraseñas no coinciden';
@@ -199,26 +200,21 @@ export class ResetPasswordComponent implements OnInit {
   }
 
   formatTime(seconds: number): string {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
   }
 
   private startCountdown(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-    }
-    
-    this.timer = window.setInterval(() => {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => {
       this.timeRemaining--;
-      if (this.timeRemaining <= 0) {
-        clearInterval(this.timer);
-      }
+      if (this.timeRemaining <= 0 && this.timer) clearInterval(this.timer);
     }, 1000);
   }
 
   private getFieldLabel(fieldName: string): string {
-    const labels: { [key: string]: string } = {
+    const labels: Record<string, string> = {
       email: 'Email',
       codigo: 'Código',
       nuevaPassword: 'Nueva contraseña',
@@ -227,20 +223,15 @@ export class ResetPasswordComponent implements OnInit {
     return labels[fieldName] || fieldName;
   }
 
-  private passwordValidator(control: any) {
-    if (control.value && !isValidPassword(control.value)) {
-      return { password: true };
-    }
-    return null;
-  }
+  private passwordValidator = (control: any) =>
+    control.value && !isValidPassword(control.value) ? { password: true } : null;
 
-  private passwordMatchValidator(group: any) {
-    const password = group.get('nuevaPassword')?.value;
-    const confirmPassword = group.get('confirmPassword')?.value;
-    
-    if (password && confirmPassword && password !== confirmPassword) {
+  private passwordMatchValidator = (group: FormGroup) => {
+    const p = group.get('nuevaPassword')?.value;
+    const c = group.get('confirmPassword')?.value;
+    if (p && c && p !== c) {
       group.get('confirmPassword')?.setErrors({ passwordMismatch: true });
     }
     return null;
-  }
+  };
 }

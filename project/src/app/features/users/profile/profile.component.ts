@@ -205,15 +205,25 @@ export class ProfileComponent implements OnInit {
   }
 
   loadProfile(): void {
-    this.currentUser = this.authService.getCurrentUser();
-    if (this.currentUser) {
-      this.profileForm.patchValue({
-        nombre: this.currentUser.nombre,
-        telefono: this.currentUser.telefono,
-        descripcion: this.currentUser.descripcion || ''
-      });
-    }
+    this.loading = true;
+    this.authService.getProfile().subscribe({
+      next: (user) => {
+        this.currentUser = user;
+        this.profileForm.patchValue({
+          nombre: user.nombre,
+          telefono: user.telefono,
+          descripcion: user.descripcion || ''
+        });
+        this.loading = false;
+      },
+      error: (err) => {
+        console.error(err);
+        this.toastService.showError('Error al cargar el perfil');
+        this.loading = false;
+      }
+    });
   }
+
 
   enableEdit(): void {
     this.editMode = true;
@@ -225,32 +235,33 @@ export class ProfileComponent implements OnInit {
   }
 
   onSave(): void {
-    if (this.profileForm.valid && !this.loading) {
-      this.loading = true;
-
-      // Mock update — reemplazar por UserService.updateProfile(...)
-      setTimeout(() => {
-        this.loading = false;
-        this.editMode = false;
-
-        if (this.currentUser) {
-          const updatedUser: User = {
-            ...this.currentUser,
-            ...this.profileForm.value
-          };
-          // Persistimos en localStorage (acorde a tu AuthService)
-          localStorage.setItem('current_user', JSON.stringify(updatedUser));
-          // Actualizamos vista inmediatamente
-          this.currentUser = updatedUser;
-        }
-
-        this.toastService.showSuccess('Perfil actualizado exitosamente');
-      }, 1000);
-    } else {
+    if (this.profileForm.invalid || this.loading) {
       this.profileForm.markAllAsTouched();
       this.toastService.showWarning('Revisa los campos del formulario');
+      return;
     }
+
+    this.loading = true;
+    const form = this.profileForm.value;
+
+    this.authService.updateProfile({
+      nombre: form.nombre,
+      telefono: form.telefono
+    }).subscribe({
+      next: (user) => {
+        this.loading = false;
+        this.editMode = false;
+        this.currentUser = user;
+        this.toastService.showSuccess('Perfil actualizado exitosamente');
+      },
+      error: (err) => {
+        this.loading = false;
+        console.error(err);
+        this.toastService.showError('No se pudo actualizar el perfil');
+      }
+    });
   }
+
 
   getFieldError(fieldName: string): string {
     const field = this.profileForm.get(fieldName);

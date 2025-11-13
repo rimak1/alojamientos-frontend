@@ -9,6 +9,9 @@ import { InputComponent } from '../../shared/ui/input/input.component';
 import { CardComponent } from '../../shared/ui/card/card.component';
 import { BadgeComponent } from '../../shared/ui/badge/badge.component';
 import { StarRatingComponent } from '../../shared/ui/star-rating/star-rating.component';
+import { forkJoin, of } from 'rxjs';
+import { switchMap, map, catchError } from 'rxjs/operators';
+
 
 import { ListingsService } from '../../core/services/listings.service';
 import { AuthService } from '../../core/services/auth.service';
@@ -212,11 +215,44 @@ export class HomeComponent implements OnInit {
   }
 
   loadFeaturedListings(): void {
-    this.listingsService.searchListings({}, 1, 6).subscribe(response => {
-      this.featuredListings = response.items;
-      this.loading = false;
+    this.loading = true;
+
+    this.listingsService.searchListings({}, 1, 6).pipe(
+      switchMap(resp => {
+        const items = resp.items || [];
+        if (!items.length) return of([]);
+
+        // Para cada alojamiento, pedimos imagen principal y rating en paralelo
+        const perItem$ = items.map(listing =>
+          forkJoin({
+            img: this.listingsService.getMainImageUrl(listing.id)
+              .pipe(catchError(() => of(''))),
+            rating: this.listingsService.getAverageRating(listing.id)
+              .pipe(catchError(() => of(undefined)))
+          }).pipe(
+            map(({ img, rating }) => ({
+              ...listing,
+              imagenes: img ? [{ url: img, principal: true }] : listing.imagenes,
+              ratingPromedio: typeof rating === 'number' ? rating : listing.ratingPromedio
+            }))
+          )
+        );
+
+        return forkJoin(perItem$);
+      })
+    ).subscribe({
+      next: (enriched: Listing[]) => {
+        this.featuredListings = enriched;
+        this.loading = false;
+      },
+      error: (err) => {
+        console.error(err);
+        // Si algo falla, mostramos al menos la lista base sin enriquecer
+        this.loading = false;
+      }
     });
   }
+
 
   goToListing(id: string): void {
     this.router.navigate(['/alojamientos', id]);

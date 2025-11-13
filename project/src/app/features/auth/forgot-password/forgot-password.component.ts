@@ -109,25 +109,31 @@ export class ForgotPasswordComponent {
   }
 
   onSubmit(): void {
-    if (this.forgotForm.valid && !this.loading) {
-      this.loading = true;
-      
-      this.authService.forgotPassword(this.forgotForm.value).subscribe({
-        next: () => {
-          this.loading = false;
-          this.emailSent = true;
-        },
-        error: (error) => {
-          this.loading = false;
-          this.toastService.showError('Error al enviar el código');
-        }
-      });
+    if (this.forgotForm.invalid || this.loading) {
+      this.forgotForm.markAllAsTouched();
+      return;
     }
+
+    this.loading = true;
+    const payload = { email: this.forgotForm.value.email };
+
+    this.authService.forgotPassword(payload).subscribe({
+      next: () => {
+        this.loading = false;
+        this.emailSent = true;
+      },
+      error: (err) => {
+        this.loading = false;
+        console.error(err);
+        this.toastService.showError('No pudimos enviar el código. Intenta de nuevo.');
+      }
+    });
   }
 
+
   goToReset(): void {
-    this.router.navigate(['/auth/reset'], { 
-      queryParams: { email: this.forgotForm.get('email')?.value } 
+    this.router.navigate(['/auth/reset'], {
+      queryParams: { email: this.forgotForm.get('email')?.value }
     });
   }
 

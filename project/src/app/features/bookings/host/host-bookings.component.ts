@@ -7,6 +7,11 @@ import { ButtonComponent } from '../../../shared/ui/button/button.component';
 import { CardComponent } from '../../../shared/ui/card/card.component';
 import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
 import { PaginationComponent } from '../../../shared/ui/pagination/pagination.component';
+import { forkJoin, of } from 'rxjs';
+import { switchMap, map, catchError } from 'rxjs/operators';
+import { ListingsService } from '../../../core/services/listings.service';
+import type { Listing } from '../../../core/models/listing.model';
+import { FormsModule } from '@angular/forms';
 
 import { BookingsService } from '../../../core/services/bookings.service';
 import { ToastService } from '../../../core/services/toast.service';
@@ -23,6 +28,7 @@ type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | '
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     HeaderComponent,
     ButtonComponent,
     CardComponent,
@@ -63,6 +69,21 @@ type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | '
 
           <!-- List view -->
           <div *ngIf="viewMode === 'list'">
+          <!-- encima de <app-card title="Filtros"> -->
+<div class="flex items-center gap-4">
+  <label class="text-sm font-medium text-ink">Alojamiento</label>
+  <select
+    class="px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+    [(ngModel)]="selectedAccommodationId"
+    (change)="loadBookings()"
+    [ngModelOptions]="{ standalone: true }"
+  >
+    <option *ngFor="let a of myAccommodations" [value]="a.id">
+      {{ a.titulo }}
+    </option>
+  </select>
+</div>
+
             <!-- Filters -->
             <app-card title="Filtros">
               <form [formGroup]="filtersForm" (ngSubmit)="applyFilters()" class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -168,6 +189,17 @@ type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | '
                         Confirmar
                       </app-button>
                       
+                      <!-- Botón para confirmar una reserva (solo si está pendiente) -->
+<app-button 
+  *ngIf="booking.estado === 'PENDIENTE'"
+  variant="primary"
+  size="sm"
+  class="flex-1"
+  (clicked)="confirmBooking(booking)"
+>
+  Confirmar
+</app-button>
+
                       <app-button 
                         variant="outline" 
                         size="sm" 
@@ -239,14 +271,39 @@ export class HostBookingsComponent implements OnInit {
   bookings: Booking[] = [];
   loading = true;
   viewMode: 'list' | 'calendar' = 'list';
-  
+
   currentPage = 1;
   pageSize = 10;
   totalResults = 0;
 
+  // alojamientos del host
+  myAccommodations: Listing[] = [];
+  selectedAccommodationId = '';
+  private mapApiToEs(api: string): Booking['estado'] {
+    const m: Record<string, Booking['estado']> = {
+      PENDING: 'PENDIENTE',
+      CONFIRMED: 'CONFIRMADA',
+      PAID: 'CONFIRMADA',
+      CANCELED: 'CANCELADA',
+      COMPLETED: 'COMPLETADA'
+    };
+    return m[api] ?? (api as Booking['estado']);
+  }
+
+  private mapEsToApi(es: string): string | undefined {
+    const m: Record<Booking['estado'], string> = {
+      PENDIENTE: 'PENDING',
+      CONFIRMADA: 'CONFIRMED',
+      CANCELADA: 'CANCELED',
+      COMPLETADA: 'COMPLETED'
+    };
+    return (es as Booking['estado']) in m ? m[es as Booking['estado']] : undefined;
+  }
+
   constructor(
     private fb: FormBuilder,
     private bookingsService: BookingsService,
+    private listingsService: ListingsService,
     private toastService: ToastService
   ) {
     this.filtersForm = this.fb.group({
@@ -257,20 +314,34 @@ export class HostBookingsComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.loadBookings();
+    this.loadMyAccommodations();
+  }
+  loadMyAccommodations(): void {
+    this.listingsService.getHostListings().subscribe({
+      next: (accommodations) => {
+        this.myAccommodations = accommodations;
+        // Si quieres seleccionar el primero por defecto:
+        if (this.myAccommodations.length) {
+          this.selectedAccommodationId = String(this.myAccommodations[0].id);
+          this.loadBookings();
+        } else {
+          this.loading = false;
+        }
+      },
+      error: () => {
+        this.loading = false;
+        this.toastService.showError('No se pudieron cargar tus alojamientos');
+      }
+    });
   }
 
   loadBookings(): void {
+    if (!this.selectedAccommodationId) return;
     this.loading = true;
-    const filters: BookingFilters = {
-      ...this.filtersForm.value,
-      anfitrion: true
-    };
 
-    this.bookingsService.getBookings(filters, this.currentPage, this.pageSize).subscribe({
-      next: (response) => {
-        this.bookings = response.items;
-        this.totalResults = response.total;
+    this.bookingsService.getByAccommodation(this.selectedAccommodationId).subscribe({
+      next: (reservas) => {
+        this.bookings = reservas;
         this.loading = false;
       },
       error: () => {
@@ -279,6 +350,8 @@ export class HostBookingsComponent implements OnInit {
       }
     });
   }
+
+
 
   applyFilters(): void {
     this.currentPage = 1;
@@ -294,14 +367,29 @@ export class HostBookingsComponent implements OnInit {
     this.viewMode = mode;
   }
 
-  confirmBooking(_booking: Booking): void {
-    // Aquí iría la llamada a servicio para confirmar.
-    this.toastService.showSuccess('Reserva confirmada');
+  confirmBooking(booking: Booking): void {
+    this.bookingsService.changeState(booking.id, 'CONFIRMED').subscribe({
+      next: () => {
+        this.toastService.showSuccess('Reserva confirmada');
+        this.loadBookings();
+      },
+      error: () => {
+        this.toastService.showError('No se pudo confirmar la reserva');
+      }
+    });
   }
 
-  contactGuest(_booking: Booking): void {
-    this.toastService.showInfo('Función de contacto no implementada');
+
+  contactGuest(booking: Booking): void {
+    if (!booking.usuario) {
+      this.toastService.showInfo('No hay datos del huésped disponibles');
+      return;
+    }
+
+    const msg = `Huésped: ${booking.usuario.nombre}\nEmail: ${booking.usuario.email}`;
+    alert(msg);
   }
+
 
   calculateTotal(booking: Booking): string {
     const nights = getDaysDifference(booking.checkIn, booking.checkOut);
@@ -319,6 +407,7 @@ export class HostBookingsComponent implements OnInit {
     return variants[estado] ?? 'default';
   }
 
+
   getStatusText(estado: Booking['estado']): string {
     const texts: Record<Booking['estado'], string> = {
       PENDIENTE: 'Pendiente',
@@ -328,6 +417,7 @@ export class HostBookingsComponent implements OnInit {
     };
     return texts[estado] || estado;
   }
+
 
   // Exponer utils al template
   formatPrice = formatPrice;
