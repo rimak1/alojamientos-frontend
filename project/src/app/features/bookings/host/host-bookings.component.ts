@@ -318,8 +318,8 @@ export class HostBookingsComponent implements OnInit {
   }
   loadMyAccommodations(): void {
     this.listingsService.getHostListings().subscribe({
-      next: (accommodations) => {
-        this.myAccommodations = accommodations;
+      next: (response) => {
+        this.myAccommodations =  response.items ?? [];
         // Si quieres seleccionar el primero por defecto:
         if (this.myAccommodations.length) {
           this.selectedAccommodationId = String(this.myAccommodations[0].id);

@@ -6,6 +6,8 @@ import type { Listing, CreateListingRequest, UpdateListingRequest } from '../mod
 import type { Pagination } from '../models/common.model';
 import { mapAccommodationFromApi, mapAccommodationToApi } from '../mappers/accommodation.mapper';
 import { AuthService } from './auth.service';
+import type { SearchFilters } from '../models/common.model';
+
 
 type SpringPage<T> = {
   content: T[];
@@ -19,28 +21,42 @@ type SpringPage<T> = {
 export class ListingsService {
   private readonly API = `${environment.apiBaseUrl}/accommodation`;
 
+    private readonly API_BASE = `${environment.apiBaseUrl}`;
+  private readonly API_ACCOMMODATIONS = `${this.API_BASE}/accommodation`;
   constructor(private http: HttpClient, private auth: AuthService) { }
 
-  /** Buscar alojamientos con paginación */
-  searchListings(_: any, page = 1, pageSize = 10): Observable<Pagination<Listing>> {
-    const params = new HttpParams()
-      .set('page', String(page - 1))
+  /**
+   * Buscar alojamientos desde el backend (paginado).
+   * Los filtros complejos los aplicaremos en el frontend.
+   */
+ searchListings(
+    filters: SearchFilters,
+    page = 1,
+    pageSize = 10
+  ): Observable<Pagination<Listing>> {
+    let params = new HttpParams()
+      .set('page', String(page - 1))   // backend usa base 0
       .set('size', String(pageSize));
 
-    return this.http.get<SpringPage<any>>(this.API, { params }).pipe(
-      map(p => {
-        const all = p.content.map(mapAccommodationFromApi);
-        const activos = all.filter(l => l.estado === 'ACTIVO'); // 👈 solo activos
-        return {
-          items: activos,
-          page: p.number + 1,
-          pageSize: p.size,
-          total: activos.length,
-          totalPages: Math.max(1, Math.ceil(activos.length / pageSize))
-        };
-      })
-    );
+    // Si luego quieres mandar ciudad al back:
+    // if (filters?.ciudad) {
+    //   params = params.set('city', filters.ciudad);
+    // }
+
+    return this.http
+      .get<SpringPage<any>>(this.API_ACCOMMODATIONS, { params })
+      .pipe(
+        map(p => ({
+          items: (p.content ?? []).map(mapAccommodationFromApi),
+          page: (p.number ?? 0) + 1,
+          pageSize: p.size ?? pageSize,
+          total: p.totalElements ?? (p.content?.length ?? 0),
+          totalPages: p.totalPages ?? 1
+        }))
+      );
   }
+
+
 
   /**  Obtener alojamiento por ID */
   getListingById(id: string): Observable<Listing> {
@@ -85,11 +101,24 @@ export class ListingsService {
   }
 
   /**  Obtener alojamientos del anfitrión actual */
-  getHostListings(): Observable<Listing[]> {
+  getHostListings(
+    page = 1,
+    pageSize = 6
+  ): Observable<Pagination<Listing>> {
+    let params = new HttpParams()
+      .set('page', String(page - 1))  // back en base 0
+      .set('size', String(pageSize));
+
     return this.http
-      .get<SpringPage<any>>(`${this.API}/host`)
+      .get<SpringPage<any>>(`${this.API_ACCOMMODATIONS}/host`, { params })
       .pipe(
-        map((p) => (p.content ?? []).map(mapAccommodationFromApi))
+        map((p) => ({
+          items: (p.content ?? []).map(mapAccommodationFromApi),
+          page: (p.number ?? 0) + 1,
+          pageSize: p.size ?? pageSize,
+          total: p.totalElements ?? (p.content?.length ?? 0),
+          totalPages: p.totalPages ?? 1
+        }))
       );
   }
 

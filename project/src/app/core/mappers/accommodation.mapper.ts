@@ -32,39 +32,57 @@ const SERVICE_CODE_TO_LABEL: Record<string, string> = {
 };
 
 export function mapAccommodationFromApi(api: any): Listing {
-  const servicesRaw: string[] =
-    api.services ??
-    api.typeServices ??
-    [];
+  // ---- Servicios ----
+  const servicesRaw: any = api.services ?? api.typeServicesEnum ?? [];
 
-  const servicesLabels = servicesRaw.map(code =>
-    SERVICE_CODE_TO_LABEL[code] ?? code
+  const serviceCodes: string[] = Array.isArray(servicesRaw)
+    ? servicesRaw
+    : servicesRaw != null
+      ? [servicesRaw]
+      : [];
+
+  const servicesLabels = serviceCodes.map(code =>
+    SERVICE_CODE_TO_LABEL[code] ?? String(code)
   );
 
+  // ---- Imágenes ----
   const rawImages = api.images ?? api.imagesAccommodation ?? [];
+
+  const imagenes: ImagenListing[] = Array.isArray(rawImages)
+    ? rawImages.map((img: any, index: number): ImagenListing => ({
+        url: img.url,
+        principal: Boolean(
+          img.principal ??
+          img.isPrincipal ??
+          (index === 0) // si nada viene marcado, la primera
+        )
+      }))
+    : [];
 
   return {
     id: String(api.id),
-    titulo: api.title ?? api.name ?? '',
+
+    // El "título" en tu back es "qualification"
+    titulo: api.qualification ?? api.title ?? api.name ?? '',
+
     descripcion: api.description ?? '',
     ciudad: api.city ?? '',
-    direccion: api.address ?? '',
-    lat: api.latitude ?? api.lat ?? 0,
-    lng: api.longitude ?? api.lng ?? 0,
+    direccion: api.address ?? api.address_accommodation ?? '',
+
+    // Tu back envía latitude/longitude como string → convertimos a número
+    lat: Number(api.latitude ?? api.lat ?? 0),
+    lng: Number(api.longitude ?? api.lng ?? 0),
+
     precioNoche: api.priceNight ?? api.price_night ?? 0,
     capacidadMax: api.maximumCapacity ?? api.maximux_capacity_accommodation ?? 1,
-    servicios: Array.isArray(api.services)
-      ? api.services.map((s: any) => String(s))
-      : api.typeServicesEnum
-        ? [String(api.typeServicesEnum)]
-        : [],
-    imagenes: (api.images || []).map((img: any): ImagenListing => ({
-      url: img.url,
-      principal: img.isPrincipal ?? img.principal ?? false
-    })),
+
+    servicios: servicesLabels,
+    imagenes,
+
     estado: api.statusAccommodation === 'ACTIVE' ? 'ACTIVO' : 'ELIMINADO',
     anfitrionId: String(api.idHost ?? ''),
-    ratingPromedio: api.averageRating ?? undefined,
+
+    ratingPromedio: api.averageRating ?? api.ratingPromedio ?? undefined,
     createdAt: api.dateCreation ?? api.createdAt ?? '',
     updatedAt: api.dateUpdate ?? api.updatedAt ?? ''
   };
@@ -78,21 +96,21 @@ export function mapAccommodationToApi(
     SERVICE_LABEL_TO_CODE[label] ?? 'WIFI'
   );
 
-  // RequestAccommodationDto SOLO admite un TypeServicesEnum,
-  // así que mandamos el primero de la lista:
-  const mainService = serviceCodes[0] ?? 'WIFI';
-
   return {
     qualification: source.titulo,
     description: source.descripcion,
     city: source.ciudad,
+    address: source.direccion,
     latitude: source.lat,
     longitude: source.lng,
     priceNight: source.precioNoche,
     maximumCapacity: source.capacidadMax,
 
-    typeServicesEnum: 'WIFI',
+    // lo que ahora pide el backend
+    services: serviceCodes,
+    idHost: hostId,
 
+    // aunque el DTO marca images como READ_ONLY, no pasa nada por enviarlas
     images: (source.imagenes ?? []).map((img, index) => ({
       url: img.url,
       isPrincipal: img.principal,

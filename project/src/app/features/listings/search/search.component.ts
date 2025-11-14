@@ -13,6 +13,8 @@ import { ListingsService } from '../../../core/services/listings.service';
 import { formatPrice } from '../../../core/utils/validation.utils';
 import type { Listing } from '../../../core/models/listing.model';
 import type { SearchFilters } from '../../../core/models/common.model';
+import { take } from 'rxjs/operators';
+
 
 @Component({
   selector: 'app-search',
@@ -241,13 +243,19 @@ import type { SearchFilters } from '../../../core/models/common.model';
 })
 export class SearchComponent implements OnInit {
   filtersForm: FormGroup;
+
+  private allListings: Listing[] = [];
+  private filteredListings: Listing[] = [];
   listings: Listing[] = [];
+
   loading = true;
   showMap = false;
-  
+
   currentPage = 1;
   pageSize = 10;
   totalResults = 0;
+
+  private readonly serverPageSize = 500;
 
   availableServices = ['WiFi', 'Aire acondicionado', 'Cocina equipada', 'TV', 'Parking gratuito', 'Piscina'];
 
@@ -268,42 +276,131 @@ export class SearchComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    // Load initial filters from query params
-    this.route.queryParams.subscribe(params => {
+    // Solo leemos los query params una vez para ciudad inicial
+    this.route.queryParams.pipe(take(1)).subscribe(params => {
       if (params['ciudad']) {
         this.filtersForm.patchValue({ ciudad: params['ciudad'] });
       }
     });
 
-    this.searchListings();
+    this.loadFromBackend();
   }
 
-  searchListings(): void {
+  /** Carga una página grande desde el backend y luego filtra/pagina en memoria */
+  private loadFromBackend(): void {
     this.loading = true;
     const filters: SearchFilters = this.filtersForm.value;
-    
-    this.listingsService.searchListings(filters, this.currentPage, this.pageSize).subscribe(response => {
-      this.listings = response.items;
-      this.totalResults = response.total;
-      this.loading = false;
-    });
+
+    this.listingsService
+      .searchListings(filters, 1, this.serverPageSize)
+      .subscribe({
+        next: (response) => {
+          this.allListings = response.items ?? [];
+          this.applyFiltersAndPagination();
+          this.loading = false;
+        },
+        error: () => {
+          this.allListings = [];
+          this.filteredListings = [];
+          this.listings = [];
+          this.totalResults = 0;
+          this.loading = false;
+        }
+      });
   }
 
-  applyFilters(): void {
+  /** Aplica filtros del formulario y recalcula paginación */
+  private applyFiltersAndPagination(): void {
+    const filters: SearchFilters = this.filtersForm.value;
+
+    const ciudad = (filters.ciudad ?? '').trim().toLowerCase();
+
+    const rawMin = filters.precioMin;
+    const rawMax = filters.precioMax;
+
+    let precioMin: number | null = null;
+    let precioMax: number | null = null;
+
+    if (rawMin !== undefined && rawMin !== null && rawMin !== '') {
+      const n = Number(rawMin);
+      precioMin = Number.isNaN(n) ? null : n;
+    }
+
+    if (rawMax !== undefined && rawMax !== null && rawMax !== '') {
+      const n = Number(rawMax);
+      precioMax = Number.isNaN(n) ? null : n;
+    }
+
+    const servicios: string[] = Array.isArray(filters.servicios)
+      ? filters.servicios
+      : [];
+
+    let result = [...this.allListings];
+
+    // ciudad
+    if (ciudad) {
+      result = result.filter(l =>
+        (l.ciudad ?? '').toLowerCase().includes(ciudad)
+      );
+    }
+
+    // precio mínimo
+    if (precioMin !== null) {
+      result = result.filter(l => l.precioNoche >= precioMin!);
+    }
+
+    // precio máximo
+    if (precioMax !== null) {
+      result = result.filter(l => l.precioNoche <= precioMax!);
+    }
+
+    // servicios
+    if (servicios.length > 0) {
+      result = result.filter(l => {
+        const srv = (l.servicios ?? []).map(s => s.toLowerCase());
+        return servicios.every(s =>
+          srv.includes(String(s).toLowerCase())
+        );
+      });
+    }
+
+    // (fechas: las dejamos sin aplicar de momento)
+
+    this.filteredListings = result;
+    this.totalResults = result.length;
+
+    const maxPage = Math.max(1, Math.ceil(this.totalResults / this.pageSize));
+    if (this.currentPage > maxPage) {
+      this.currentPage = maxPage;
+    }
+
+    const start = (this.currentPage - 1) * this.pageSize;
+    const end = start + this.pageSize;
+    this.listings = this.filteredListings.slice(start, end);
+  }
+
+  /** submit del form */
+  onSubmitFilters(): void {
     this.currentPage = 1;
-    this.searchListings();
+    this.applyFiltersAndPagination();
   }
 
   clearFilters(): void {
-    this.filtersForm.reset();
+    this.filtersForm.reset({
+      ciudad: '',
+      fechaInicio: '',
+      fechaFin: '',
+      precioMin: '',
+      precioMax: '',
+      servicios: []
+    });
     this.currentPage = 1;
-    this.searchListings();
+    this.applyFiltersAndPagination();
   }
 
   onPageChange(page: number): void {
     this.currentPage = page;
-    this.searchListings();
-    // Scroll to top
+    this.applyFiltersAndPagination();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -323,17 +420,21 @@ export class SearchComponent implements OnInit {
   toggleService(service: string, event: Event): void {
     const target = event.target as HTMLInputElement;
     const servicios = this.filtersForm.get('servicios')?.value || [];
-    
+
     if (target.checked) {
-      this.filtersForm.patchValue({ 
-        servicios: [...servicios, service] 
+      this.filtersForm.patchValue({
+        servicios: [...servicios, service]
       });
     } else {
-      this.filtersForm.patchValue({ 
-        servicios: servicios.filter((s: string) => s !== service) 
+      this.filtersForm.patchValue({
+        servicios: servicios.filter((s: string) => s !== service)
       });
     }
   }
+
+applyFilters(): void {
+  this.onSubmitFilters();
+}
 
   formatPrice = formatPrice;
 }
