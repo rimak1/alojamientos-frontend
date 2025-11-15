@@ -1,15 +1,35 @@
 import type { Booking, CreateBookingRequest } from '../models/booking.model';
 
+function mapEstadoApiToEs(status: string): Booking['estado'] {
+  const map: Record<string, Booking['estado']> = {
+    PENDING: 'PENDIENTE',
+    CONFIRMED: 'CONFIRMADA',
+    PAID: 'CONFIRMADA',
+    CANCELED: 'CANCELADA',
+    COMPLETED: 'COMPLETADA'
+  };
+  return map[status] ?? 'PENDIENTE';
+}
 export function mapBookingFromApi(api: any): Booking {
   return {
     id: String(api.id),
     alojamientoId: String(api.idAccommodation),
     usuarioId: String(api.idGuest),
-    checkIn: api.dateCheckin?.split('T')[0],
-    checkOut: api.dateCheckout?.split('T')[0],
+    checkIn: api.dateCheckin,
+    checkOut: api.dateCheckout,
     huespedes: api.quantityPeople,
-    estado: api.statusReservation,
+    estado: mapEstadoApiToEs(api.statusReservation),
     creadoEn: api.dateCreation,
+    alojamiento: api.accommodation ? {
+      titulo: api.accommodation.title ?? api.accommodation.qualification ?? '',
+      ciudad: api.accommodation.city ?? '',
+      precioNoche: api.accommodation.priceNight ?? 0,
+      imagenPrincipal: api.accommodation.mainImageUrl ?? ''
+    } : undefined,
+    usuario: api.guestName || api.guestEmail ? {
+      nombre: api.guestName ?? 'Huésped',
+      email: api.guestEmail ?? '',
+    } : undefined
   };
 }
 

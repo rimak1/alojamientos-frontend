@@ -18,6 +18,7 @@ import { formatPrice, formatDate, getDaysDifference } from '../../../core/utils/
 import type { Listing } from '../../../core/models/listing.model';
 import type { Review } from '../../../core/models/review.model';
 import type { CreateReviewRequest } from '../../../core/models/review.model';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 
 
 
@@ -92,15 +93,25 @@ import type { CreateReviewRequest } from '../../../core/models/review.model';
             </app-card>
 
             <!-- Location -->
-            <app-card title="Ubicación">
-              <p class="text-gray-700 mb-4">{{ listing.direccion }}, {{ listing.ciudad }}</p>
-              <iframe
-                [src]="'https://www.openstreetmap.org/export/embed.html?bbox=' + (listing.lng-0.01) + ',' + (listing.lat-0.01) + ',' + (listing.lng+0.01) + ',' + (listing.lat+0.01) + '&layer=mapnik&marker=' + listing.lat + ',' + listing.lng"
-                class="w-full h-64 rounded-xl"
-                frameborder="0"
-                title="Ubicación del alojamiento"
-              ></iframe>
-            </app-card>
+<app-card title="Ubicación">
+  <p class="text-gray-700 mb-4">{{ listing.direccion }}, {{ listing.ciudad }}</p>
+
+  <ng-container *ngIf="mapUrl; else noMap">
+    <iframe
+      [src]="mapUrl"
+      class="w-full h-64 rounded-xl"
+      frameborder="0"
+      title="Ubicación del alojamiento"
+    ></iframe>
+  </ng-container>
+
+  <ng-template #noMap>
+    <p class="text-sm text-gray-500">
+      No hay información suficiente de ubicación para mostrar el mapa.
+    </p>
+  </ng-template>
+</app-card>
+
 
             <!-- Reviews -->
             <app-card [title]="'Reseñas (' + reviews.length + ')'">
@@ -317,8 +328,8 @@ export class ListingDetailComponent implements OnInit {
     private bookingsService: BookingsService,
     private reviewsService: ReviewsService,
     private authService: AuthService,
-    private toastService: ToastService
-
+    private toastService: ToastService,
+    private sanitizer: DomSanitizer
 
 
   ) {
@@ -332,6 +343,8 @@ export class ListingDetailComponent implements OnInit {
       texto: ['', [Validators.required, Validators.minLength(10)]]
     });
   }
+  mapUrl: SafeResourceUrl | null = null;
+
   get canReview(): boolean {
     const user = this.authService.getCurrentUser();
 
@@ -381,16 +394,38 @@ export class ListingDetailComponent implements OnInit {
     return 0;
   }
 
-  loadListing(id: string): void {
-    this.listingsService.getListingById(id).subscribe(listing => {
-      this.listing = listing;
-      this.bookingForm.get('huespedes')?.setValidators([
-        Validators.required,
-        Validators.min(1),
-        Validators.max(listing.capacidadMax)
-      ]);
-    });
-  }
+loadListing(id: string): void {
+  this.listingsService.getListingById(id).subscribe(listing => {
+    this.listing = listing;
+
+    // Validar que lat/lng sean válidos
+    const lat = Number(listing.lat);
+    const lng = Number(listing.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      this.mapUrl = null;
+    } else {
+      const delta = 0.01;
+      const bbox = [
+        lng - delta,
+        lat - delta,
+        lng + delta,
+        lat + delta
+      ].join(',');
+
+      const url = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lng}`;
+
+      this.mapUrl = this.sanitizer.bypassSecurityTrustResourceUrl(url);
+    }
+
+    this.bookingForm.get('huespedes')?.setValidators([
+      Validators.required,
+      Validators.min(1),
+      Validators.max(listing.capacidadMax)
+    ]);
+  });
+}
+
 
   loadReviews(alojamientoId: string): void {
     this.reviewsService.getListingReviews(alojamientoId).subscribe(reviews => {

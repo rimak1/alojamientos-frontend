@@ -39,9 +39,11 @@ export interface ResetPasswordRequest {
 }
 
 export interface ChangePasswordRequest {
-  passwordActual: string;
-  nuevaPassword: string;
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
 }
+
 export interface RequestPasswordReset {
   email: string;
 }

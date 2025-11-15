@@ -73,7 +73,7 @@ import { take } from 'rxjs/operators';
                     <app-input
                       label="Máximo"
                       type="number"
-                      placeholder="1000"
+                      placeholder="1000000"
                       formControlName="precioMax"
                     ></app-input>
                   </div>
@@ -127,7 +127,7 @@ import { take } from 'rxjs/operators';
             <div *ngIf="showMap" class="mb-8">
               <app-card>
                 <iframe
-                  src="https://www.openstreetmap.org/export/embed.html?bbox=-4.7,40.0,-3.0,41.0&layer=mapnik&marker=40.4168,-3.7038"
+                  src="https://www.openstreetmap.org/export/embed.html?bbox=-75.6,3.5,-75.9,4.9&layer=mapnik&marker=4.5327777777778,-75.6725"
                   class="w-full h-64 rounded-xl"
                   frameborder="0"
                   title="Mapa de alojamientos"

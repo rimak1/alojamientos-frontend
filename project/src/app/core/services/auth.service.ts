@@ -203,7 +203,7 @@ export class AuthService {
       fechaNacimiento: api.dateBirth,
     };
   }
-  // auth.service.ts (añade este método a la clase)
+
   public forceLocalLogout() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('current_user');
