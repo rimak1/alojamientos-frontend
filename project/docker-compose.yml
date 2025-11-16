@@ -35,6 +35,15 @@ services:
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.MariaDBDialect
       TZ: America/Bogota
+
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USERNAME: "stayco928@gmail.com"
+      SMTP_PASSWORD: "hcnxwnzghgddipww"
+      SMTP_TLS: "true"
+
+      EMAIL_ENABLED: "true"
+      AUTO_VERIFY_USERS: "true"
     depends_on:
       mariadb:
         condition: service_healthy

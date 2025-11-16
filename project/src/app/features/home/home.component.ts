@@ -191,12 +191,10 @@ export class HomeComponent implements OnInit {
   searchForm: FormGroup;
   featuredListings: Listing[] = [];
   loading = true;
-  currentUser: User | null = null;
 
   constructor(
     private fb: FormBuilder,
     private listingsService: ListingsService,
-    private authService: AuthService,
     public router: Router
   ) {
     this.searchForm = this.fb.group({
@@ -205,7 +203,6 @@ export class HomeComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.currentUser = this.authService.getCurrentUser();
     this.loadFeaturedListings();
   }
 
@@ -217,13 +214,20 @@ export class HomeComponent implements OnInit {
   loadFeaturedListings(): void {
     this.loading = true;
 
-    this.listingsService.searchListings({}, 1, 6).pipe(
-      switchMap(resp => {
-        const items = resp.items || [];
-        if (!items.length) return of([]);
+    this.listingsService.searchListings({}, 1, 6).subscribe({
+      next: (resp) => {
+        const baseItems = resp.items ?? [];
 
-        // Para cada alojamiento, pedimos imagen principal y rating en paralelo
-        const perItem$ = items.map(listing =>
+        // Mostrar al menos la lista base de alojamientos
+        this.featuredListings = baseItems;
+        this.loading = false;
+
+        if (!baseItems.length) {
+          return;
+        }
+
+        // Ahora enriquecemos en segundo plano con imagen principal + rating
+        const perItem$ = baseItems.map(listing =>
           forkJoin({
             img: this.listingsService.getMainImageUrl(listing.id)
               .pipe(catchError(() => of(''))),
@@ -238,20 +242,24 @@ export class HomeComponent implements OnInit {
           )
         );
 
-        return forkJoin(perItem$);
-      })
-    ).subscribe({
-      next: (enriched: Listing[]) => {
-        this.featuredListings = enriched;
-        this.loading = false;
+        forkJoin(perItem$).subscribe({
+          next: (enriched: Listing[]) => {
+            this.featuredListings = enriched;
+          },
+          error: (err) => {
+            console.error('Error enriqueciendo alojamientos destacados', err);
+            // Si falla el enriquecimiento, dejamos los baseItems ya mostrados
+          }
+        });
       },
       error: (err) => {
-        console.error(err);
-        // Si algo falla, mostramos al menos la lista base sin enriquecer
+        console.error('Error cargando alojamientos destacados', err);
+        this.featuredListings = [];
         this.loading = false;
       }
     });
   }
+
 
 
   goToListing(id: string): void {

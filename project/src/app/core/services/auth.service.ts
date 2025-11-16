@@ -26,8 +26,13 @@ export class AuthService {
   private readonly API = environment.apiBaseUrl; // '/api/v1'
 
   constructor(private http: HttpClient) {
-    this.loadUserFromStorage();
+    // Ya no cargamos usuario desde storage
+    // this.loadUserFromStorage();
+
+    // En su lugar, limpiamos siempre cualquier sesión previa al arrancar la app
+    this.clearSession();
   }
+
 
   /** Conveniencia para tu LoginComponent actual (por defecto GUEST) */
   login(credentials: LoginRequest): Observable<User> {
@@ -173,7 +178,7 @@ export class AuthService {
     this.currentUserSubject.next(user);
   }
 
-  private clearSession() {
+  public clearSession() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('current_user');
     this.currentUserSubject.next(null);
@@ -205,9 +210,7 @@ export class AuthService {
   }
 
   public forceLocalLogout() {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('current_user');
-    this['currentUserSubject']?.next(null); // o this.currentUserSubject.next(null) si es accesible
+    this.clearSession();
   }
 
 }

@@ -448,13 +448,29 @@ loadListing(id: string): void {
     });
   }
 
-  onBooking(): void {
+    onBooking(): void {
     if (!this.isAuthenticated) {
       this.router.navigate(['/auth/login']);
       return;
     }
 
-    if (this.bookingForm.valid && this.listing && !this.bookingLoading) {
+    if (!this.listing) {
+      this.toastService.showError('Alojamiento no cargado');
+      return;
+    }
+
+    if (this.bookingForm.invalid) {
+      this.bookingForm.markAllAsTouched();
+      return;
+    }
+
+    // Validar contra fechas ocupadas ANTES de llamar al backend
+    if (this.formRangeHasConflicts()) {
+      this.toastService.showError('Las fechas seleccionadas incluyen días ocupados. Por favor ajusta el rango.');
+      return;
+    }
+
+    if (!this.bookingLoading) {
       this.bookingLoading = true;
 
       const bookingData = {
@@ -466,15 +482,38 @@ loadListing(id: string): void {
         next: (booking) => {
           this.bookingLoading = false;
           this.toastService.showSuccess('¡Reserva creada exitosamente!');
+
+          //  Actualizar calendario localmente (por si el usuario sigue viendo el detalle)
+          this.loadOccupiedDates(String(this.listing!.id));
+          this.selectedCheckIn = null;
+          this.selectedCheckOut = null;
+          this.bookingForm.reset({
+            checkIn: '',
+            checkOut: '',
+            huespedes: 1
+          });
+
+          // Navegar a la vista de reservas del usuario (lo que ya tenías)
           this.router.navigate(['/reservas']);
         },
         error: (error) => {
           this.bookingLoading = false;
-          this.toastService.showError('Error al crear la reserva');
+
+          // Si el backend manda mensaje específico de no disponible, lo mostramos
+          const msgBackend: string = error?.error?.message || error?.error?.mensaje || '';
+
+          if (msgBackend.includes('no está disponible') || msgBackend.includes('disponible')) {
+            this.toastService.showError('El alojamiento no está disponible para esas fechas. Revisa el calendario.');
+            // Actualizamos por si hubo otra reserva de otro usuario entre tanto
+            this.loadOccupiedDates(String(this.listing!.id));
+          } else {
+            this.toastService.showError('Error al crear la reserva');
+          }
         }
       });
     }
   }
+
 
   getFieldError(fieldName: string): string {
     const field = this.bookingForm.get(fieldName);
@@ -518,38 +557,46 @@ private generateCalendar(): void {
   }
 }
 
-onCalendarDayClick(day: any): void {
-  // No permitimos seleccionar pasadas ni ocupadas
-  if (day.isPast || day.isOccupied) return;
+  onCalendarDayClick(day: any): void {
+    // No permitimos seleccionar pasadas ni ocupadas
+    if (day.isPast || day.isOccupied) return;
 
-  const dateStr: string = day.dateString;
+    const dateStr: string = day.dateString;
 
-  // 1) Si no hay check-in, o ya había rango completo, o el nuevo día es antes del inicio → reiniciar rango
-  if (
-    !this.selectedCheckIn ||
-    (this.selectedCheckIn && this.selectedCheckOut) ||
-    dateStr < this.selectedCheckIn
-  ) {
-    this.selectedCheckIn = dateStr;
-    this.selectedCheckOut = null;
+    // 1) Si no hay check-in, o ya hay rango completo, o el nuevo día es antes del inicio → reiniciar rango
+    if (
+      !this.selectedCheckIn ||
+      (this.selectedCheckIn && this.selectedCheckOut) ||
+      dateStr < this.selectedCheckIn
+    ) {
+      this.selectedCheckIn = dateStr;
+      this.selectedCheckOut = null;
 
-    this.bookingForm.patchValue({
-      checkIn: this.selectedCheckIn,
-      checkOut: ''
-    });
-    return;
+      this.bookingForm.patchValue({
+        checkIn: this.selectedCheckIn,
+        checkOut: ''
+      });
+      return;
+    }
+
+    // 2) Si hay check-in y aún no hay check-out, y el día es posterior → fijar check-out
+    if (!this.selectedCheckOut && dateStr > this.selectedCheckIn) {
+
+      //  Validar que el rango no incluya días ocupados
+      if (this.rangeContainsOccupied(this.selectedCheckIn, dateStr)) {
+        this.toastService.showError('No puedes seleccionar un rango que incluya fechas ocupadas');
+        return;
+      }
+
+      this.selectedCheckOut = dateStr;
+
+      this.bookingForm.patchValue({
+        checkIn: this.selectedCheckIn,
+        checkOut: this.selectedCheckOut
+      });
+    }
   }
 
-  // 2) Si hay check-in y aún no hay check-out, y el día es posterior → fijar check-out
-  if (!this.selectedCheckOut && dateStr > this.selectedCheckIn) {
-    this.selectedCheckOut = dateStr;
-
-    this.bookingForm.patchValue({
-      checkIn: this.selectedCheckIn,
-      checkOut: this.selectedCheckOut
-    });
-  }
-}
 
 
 getCalendarDayClasses(day: any): string {
@@ -618,7 +665,7 @@ getCalendarDayClasses(day: any): string {
 
     const payload: CreateReviewRequest = {
       alojamientoId: this.listing.id,
-      reservaId: this.reservaId,       // 👈 AHORA SÍ
+      reservaId: this.reservaId,       
       rating: formValue.rating,
       texto: formValue.texto
     };
@@ -646,6 +693,35 @@ getCalendarDayClasses(day: any): string {
       }
     });
   }
+
+    /**
+   * Verifica si el rango [startDateStr, endDateStr] (YYYY-MM-DD)
+   * contiene alguna fecha ocupada.
+   */
+  private rangeContainsOccupied(startDateStr: string, endDateStr: string): boolean {
+    if (!startDateStr || !endDateStr) return false;
+
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+
+    // Normalizamos ocupadas a Date y comprobamos si caen dentro del rango
+    return this.occupiedDates.some(dStr => {
+      const d = new Date(dStr);
+      return d >= start && d <= end;
+    });
+  }
+    /**
+   * Valida que el rango del formulario (checkIn/checkOut) no choque con fechas ocupadas.
+   */
+  private formRangeHasConflicts(): boolean {
+    const checkIn = this.bookingForm.get('checkIn')?.value;
+    const checkOut = this.bookingForm.get('checkOut')?.value;
+
+    if (!checkIn || !checkOut) return false;
+
+    return this.rangeContainsOccupied(checkIn, checkOut);
+  }
+
 
 
 

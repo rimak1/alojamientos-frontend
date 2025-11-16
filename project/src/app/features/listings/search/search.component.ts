@@ -364,7 +364,8 @@ export class SearchComponent implements OnInit {
       });
     }
 
-    // (fechas: las dejamos sin aplicar de momento)
+    // Nota: los filtros de fecha se aplican en el backend (SearchFilters.fechaInicio / fechaFin)
+
 
     this.filteredListings = result;
     this.totalResults = result.length;
@@ -395,8 +396,10 @@ export class SearchComponent implements OnInit {
       servicios: []
     });
     this.currentPage = 1;
-    this.applyFiltersAndPagination();
+    this.loadFromBackend();
   }
+
+
 
   onPageChange(page: number): void {
     this.currentPage = page;
@@ -432,9 +435,10 @@ export class SearchComponent implements OnInit {
     }
   }
 
-applyFilters(): void {
-  this.onSubmitFilters();
-}
+  applyFilters(): void {
+    this.currentPage = 1;
+    this.loadFromBackend();
+  }
 
   formatPrice = formatPrice;
 }

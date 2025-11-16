@@ -227,6 +227,7 @@ import type { Booking, BookingFilters } from '../../../core/models/booking.model
 export class UserBookingsComponent implements OnInit {
   filtersForm: FormGroup;
   bookings: Booking[] = [];
+  allBookings: Booking[] = [];
   loading = true;
 
   currentPage = 1;
@@ -278,22 +279,23 @@ export class UserBookingsComponent implements OnInit {
   loadBookings(): void {
     this.loading = true;
 
-    // Tomamos los filtros del form y convertimos el estado a lo que espera el backend
+    // Tomamos los filtros del form, pero solo usaremos estado/fechas en el front
     const f = this.filtersForm.value;
     const estadoApi = f.estado ? this.mapEsToApi(f.estado) : undefined;
 
     const filters: BookingFilters = {
       ...f,
-      estado: estadoApi,   // BookingsService enviará ?status=...
+      estado: estadoApi,   // por si en un futuro el back lo soporta
       propias: true
     };
 
-    this.bookingsService.getBookings(filters, this.currentPage, this.pageSize).pipe(
-      // Enriquecer cada reserva con info del alojamiento y normalizar estado a español
+    // Pedimos una página grande (p.ej. 1000) y paginamos en el front
+    this.bookingsService.getBookings(filters, 1, 1000).pipe(
       switchMap((response) => {
         const items = response.items || [];
         if (!items.length) {
-          this.totalResults = response.total;
+          this.allBookings = [];
+          this.totalResults = 0;
           return of([] as Booking[]);
         }
 
@@ -307,12 +309,12 @@ export class UserBookingsComponent implements OnInit {
             map(({ acc, img }) => {
               const alojamiento = acc
                 ? {
-                  titulo: acc.titulo,
-                  ciudad: acc.ciudad,
-                  precioNoche: acc.precioNoche,
-                  imagenPrincipal: img || undefined
-                }
-                : b.alojamiento; // fallback
+                    titulo: acc.titulo,
+                    ciudad: acc.ciudad,
+                    precioNoche: acc.precioNoche,
+                    imagenPrincipal: img || undefined
+                  }
+                : b.alojamiento; // fallback si algo falla
 
               return {
                 ...b,
@@ -323,36 +325,73 @@ export class UserBookingsComponent implements OnInit {
           )
         );
 
-        // devolvemos el arreglo enriquecido
-        return forkJoin(perItem$).pipe(
-          map((enriched) => {
-            this.totalResults = response.total;
-            return enriched;
-          })
-        );
+        return forkJoin(perItem$);
       })
     ).subscribe({
       next: (enriched) => {
-        this.bookings = enriched;
+        this.allBookings = enriched;  
         this.loading = false;
+        this.updatePagedBookings();    
       },
       error: (err) => {
         console.error(err);
+        this.allBookings = [];
         this.bookings = [];
+        this.totalResults = 0;
         this.loading = false;
       }
     });
   }
+    /**
+   * Aplica los filtros del formulario sobre allBookings
+   * y actualiza this.bookings con la página actual.
+   */
+  private updatePagedBookings(): void {
+    const f = this.filtersForm.value;
+    const estadoFiltro: Booking['estado'] | '' = f.estado;
+    const desdeStr: string | '' = f.desde;
+    const hastaStr: string | '' = f.hasta;
+
+    let filtered = [...this.allBookings];
+
+    // Filtro por estado (en español: PENDIENTE, CONFIRMADA, etc.)
+    if (estadoFiltro) {
+      filtered = filtered.filter(b => b.estado === estadoFiltro);
+    }
+
+    // Filtro por fecha "desde" (check-in >= desde)
+    if (desdeStr) {
+      const desde = new Date(desdeStr);
+      filtered = filtered.filter(b => new Date(b.checkIn) >= desde);
+    }
+
+    // Filtro por fecha "hasta" (check-out <= hasta)
+    if (hastaStr) {
+      const hasta = new Date(hastaStr);
+      filtered = filtered.filter(b => new Date(b.checkOut) <= hasta);
+    }
+
+    // Actualizamos conteo total para el componente de paginación
+    this.totalResults = filtered.length;
+
+    // Paginación en memoria
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const endIndex = startIndex + this.pageSize;
+
+    this.bookings = filtered.slice(startIndex, endIndex);
+  }
+
+
 
 
   applyFilters(): void {
     this.currentPage = 1;
-    this.loadBookings();
+    this.updatePagedBookings();
   }
 
   onPageChange(page: number): void {
     this.currentPage = page;
-    this.loadBookings();
+    this.updatePagedBookings();
   }
 
   canCancelBooking(booking: Booking): boolean {
