@@ -56,16 +56,16 @@ import type { Listing, ImagenListing } from '../../../core/models/listing.model'
                 <app-input
                   label="Ciudad"
                   type="text"
-                  placeholder="Madrid"
+                  placeholder="Ej: Armenia"
                   formControlName="ciudad"
                   [errorMessage]="getFieldError('ciudad')"
                   required
                 ></app-input>
 
                 <app-input
-                  label="Precio por noche (€)"
+                  label="Precio por noche (COP$)"
                   type="number"
-                  placeholder="50"
+                  placeholder="Ej: 50000"
                   formControlName="precioNoche"
                   [errorMessage]="getFieldError('precioNoche')"
                   required
@@ -75,7 +75,7 @@ import type { Listing, ImagenListing } from '../../../core/models/listing.model'
                   <app-input
                     label="Dirección completa"
                     type="text"
-                    placeholder="Calle Mayor 123"
+                    placeholder="Ej: Calle Mayor 123"
                     formControlName="direccion"
                     [errorMessage]="getFieldError('direccion')"
                     required
@@ -85,7 +85,7 @@ import type { Listing, ImagenListing } from '../../../core/models/listing.model'
                 <app-input
                   label="Latitud"
                   type="number"
-                  placeholder="40.4168"
+                  placeholder="Ej: 40,4168"
                   formControlName="lat"
                   [errorMessage]="getFieldError('lat')"
                   hint="Coordenada geográfica"
@@ -95,7 +95,7 @@ import type { Listing, ImagenListing } from '../../../core/models/listing.model'
                 <app-input
                   label="Longitud"
                   type="number"
-                  placeholder="-3.7038"
+                  placeholder="Ej: -3,7038"
                   formControlName="lng"
                   [errorMessage]="getFieldError('lng')"
                   hint="Coordenada geográfica"
@@ -105,7 +105,7 @@ import type { Listing, ImagenListing } from '../../../core/models/listing.model'
                 <app-input
                   label="Capacidad máxima"
                   type="number"
-                  placeholder="4"
+                  placeholder="Ej: 4"
                   formControlName="capacidadMax"
                   [errorMessage]="getFieldError('capacidadMax')"
                   hint="Número máximo de huéspedes"

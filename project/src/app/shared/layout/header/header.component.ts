@@ -41,10 +41,10 @@ import type { User } from '../../../core/models/user.model';
                 <a routerLink="/anfitrion/alojamientos" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
                   Mis Alojamientos
                 </a>
-                <a routerLink="/anfitrion/reservas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duración-200">
+                <a routerLink="/anfitrion/reservas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
                   Reservas
                 </a>
-                <a routerLink="/anfitrion/metricas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duración-200">
+                <a routerLink="/anfitrion/metricas" class="block px-4 py-2 text-sm text-ink hover:bg-accent hover:text-primary transition-colors duration-200">
                   Métricas
                 </a>
               </div>

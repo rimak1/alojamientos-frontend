@@ -276,13 +276,16 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
                       <span class="ml-4 text-green-500">●</span> Disponible
                     </p>
                     <!-- Simple calendar placeholder -->
-                    <div class="grid grid-cols-7 gap-1 mt-4 text-xs">
-                      <div *ngFor="let day of calendarDays" 
-                           [class]="getCalendarDayClasses(day)"
-                           class="h-8 flex items-center justify-center rounded">
-                        {{ day.day }}
-                      </div>
-                    </div>
+                   <div class="grid grid-cols-7 gap-1 mt-4 text-xs">
+  <div
+    *ngFor="let day of calendarDays"
+    [ngClass]="getCalendarDayClasses(day)"
+    (click)="onCalendarDayClick(day)"
+  >
+    {{ day.day }}
+  </div>
+</div>
+
                   </div>
                 </div>
               </app-card>
@@ -320,6 +323,11 @@ export class ListingDetailComponent implements OnInit {
   reviewForm: FormGroup;
   submittingReview = false;
   reservaId: string | null = null;
+  currentMonth = new Date().getMonth();
+  currentYear = new Date().getFullYear();
+   selectedCheckIn: string | null = null;   // 'YYYY-MM-DD'
+  selectedCheckOut: string | null = null;
+
   constructor(
     private fb: FormBuilder,
     private route: ActivatedRoute,
@@ -487,37 +495,100 @@ loadListing(id: string): void {
     return labels[fieldName] || fieldName;
   }
 
-  private generateCalendar(): void {
-    const today = new Date();
-    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+private generateCalendar(): void {
+  const today = new Date();
+  const year = this.currentYear;
+  const month = this.currentMonth;
 
-    this.calendarDays = [];
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(today.getFullYear(), today.getMonth(), day);
-      const dateString = date.toISOString().split('T')[0];
+  const firstDayOfMonth = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-      this.calendarDays.push({
-        day,
-        dateString,
-        isOccupied: this.occupiedDates.includes(dateString),
-        isPast: date < today
-      });
-    }
+  this.calendarDays = [];
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    const dateString = date.toISOString().split('T')[0];
+
+    this.calendarDays.push({
+      day,
+      dateString,
+      isOccupied: this.occupiedDates.includes(dateString),
+      isPast: date < today
+    });
+  }
+}
+
+onCalendarDayClick(day: any): void {
+  // No permitimos seleccionar pasadas ni ocupadas
+  if (day.isPast || day.isOccupied) return;
+
+  const dateStr: string = day.dateString;
+
+  // 1) Si no hay check-in, o ya había rango completo, o el nuevo día es antes del inicio → reiniciar rango
+  if (
+    !this.selectedCheckIn ||
+    (this.selectedCheckIn && this.selectedCheckOut) ||
+    dateStr < this.selectedCheckIn
+  ) {
+    this.selectedCheckIn = dateStr;
+    this.selectedCheckOut = null;
+
+    this.bookingForm.patchValue({
+      checkIn: this.selectedCheckIn,
+      checkOut: ''
+    });
+    return;
   }
 
-  getCalendarDayClasses(day: any): string {
-    const baseClasses = 'h-8 flex items-center justify-center rounded text-xs';
+  // 2) Si hay check-in y aún no hay check-out, y el día es posterior → fijar check-out
+  if (!this.selectedCheckOut && dateStr > this.selectedCheckIn) {
+    this.selectedCheckOut = dateStr;
 
-    if (day.isPast) {
-      return `${baseClasses} bg-gray-100 text-gray-400`;
-    }
-
-    if (day.isOccupied) {
-      return `${baseClasses} bg-red-100 text-red-600`;
-    }
-
-    return `${baseClasses} bg-green-100 text-green-600 hover:bg-green-200 cursor-pointer`;
+    this.bookingForm.patchValue({
+      checkIn: this.selectedCheckIn,
+      checkOut: this.selectedCheckOut
+    });
   }
+}
+
+
+getCalendarDayClasses(day: any): string {
+  const base = 'h-8 flex items-center justify-center rounded text-xs';
+
+  if (day.isPast) {
+    return `${base} bg-gray-100 text-gray-400 cursor-not-allowed`;
+  }
+
+  if (day.isOccupied) {
+    return `${base} bg-red-100 text-red-600 cursor-not-allowed`;
+  }
+
+  const dateStr = day.dateString;
+  const start = this.selectedCheckIn;
+  const end = this.selectedCheckOut;
+
+  // Día inicio / fin
+  if (start && dateStr === start && !end) {
+    return `${base} bg-primary text-white cursor-pointer`;
+  }
+
+  if (start && end && dateStr === start) {
+    return `${base} bg-primary text-white font-semibold cursor-pointer`;
+  }
+
+  if (start && end && dateStr === end) {
+    return `${base} bg-primary text-white font-semibold cursor-pointer`;
+  }
+
+  // Dentro del rango
+  if (start && end && dateStr > start && dateStr < end) {
+    return `${base} bg-primary/10 text-primary cursor-pointer`;
+  }
+
+  // Día normal seleccionable
+  return `${base} bg-green-100 text-green-600 hover:bg-green-200 cursor-pointer`;
+}
+
   onSubmitReview(): void {
     if (!this.isAuthenticated) {
       this.router.navigate(['/auth/login'], {

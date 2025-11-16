@@ -236,23 +236,32 @@ export class BookingsService {
   // -----------------------------
   // Utilidades
   // -----------------------------
-  /** Fechas ocupadas de un alojamiento generadas a partir de sus reservas */
-  getOccupiedDates(accommodationId: string): Observable<string[]> {
-    return this.getByAccommodation(accommodationId).pipe(
-      map((bookings) => {
-        const days: string[] = [];
-        bookings.forEach(b => {
-          const start = new Date(b.checkIn);
-          const end = new Date(b.checkOut);
-          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            days.push(d.toISOString().slice(0, 10));
-          }
-        });
-        // único
-        return Array.from(new Set(days));
-      })
-    );
-  }
+/** Fechas ocupadas de un alojamiento generadas a partir de sus reservas */
+getOccupiedDates(accommodationId: string): Observable<string[]> {
+  return this.getByAccommodation(accommodationId).pipe(
+    map((bookings) => {
+      // Solo cuentan reservas activas
+      const active = bookings.filter(
+        b => b.estado === 'PENDIENTE' || b.estado === 'CONFIRMADA'
+      );
+
+      const days: string[] = [];
+
+      active.forEach(b => {
+        const start = new Date(b.checkIn);
+        const end = new Date(b.checkOut);
+
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          days.push(d.toISOString().slice(0, 10));
+        }
+      });
+
+      // Fechas únicas
+      return Array.from(new Set(days));
+    })
+  );
+}
+
 
   /** (Opcional) Cambiar estado si tu back lo soporta: PUT /reservations/{id}/state?state=... */
   changeState(id: string, state: 'CONFIRMED' | 'CANCELED' | 'PAID', reason?: string): Observable<void> {
