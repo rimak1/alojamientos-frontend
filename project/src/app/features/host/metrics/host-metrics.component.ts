@@ -5,58 +5,75 @@ import { HeaderComponent } from '../../../shared/layout/header/header.component'
 import { ButtonComponent } from '../../../shared/ui/button/button.component';
 import { CardComponent } from '../../../shared/ui/card/card.component';
 import { formatPrice } from '../../../core/utils/validation.utils';
+import { MetricsService, type MetricData } from '../../../core/services/metrics.service';
+import { ToastService } from '../../../core/services/toast.service';
+import { BookingsService } from '../../../core/services/bookings.service';
+import { ListingsService } from '../../../core/services/listings.service';
+import type { Listing } from '../../../core/models/listing.model';
+import type { Booking } from '../../../core/models/booking.model';
+import { forkJoin, of } from 'rxjs';
+import { map, catchError } from 'rxjs/operators';
+import { FormsModule } from '@angular/forms';
 
-interface MetricData {
-  totalReservas: number;
-  ingresosTotales: number;
-  ratingPromedio: number;
-  ocupacionPromedio: number;
-  reservasPorMes: { mes: string; reservas: number; ingresos: number }[];
-}
 
 @Component({
   selector: 'app-host-metrics',
   standalone: true,
   imports: [
-    CommonModule,
-    ReactiveFormsModule,
-    HeaderComponent,
+    CommonModule, 
+    ReactiveFormsModule, 
+    HeaderComponent, 
     ButtonComponent,
-    CardComponent
-  ],
+    FormsModule,  
+    CardComponent],
   template: `
     <app-header></app-header>
 
     <div class="bg-base min-h-screen py-8">
       <div class="container mx-auto px-4">
         <div class="max-w-6xl mx-auto space-y-8">
-          <!-- Header -->
           <div class="text-center">
             <h1 class="text-3xl font-bold text-ink">Métricas y Estadísticas</h1>
             <p class="text-gray-600 mt-2">Analiza el rendimiento de tus alojamientos</p>
           </div>
 
-          <!-- Date filters -->
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h1 class="text-3xl font-bold text-ink">Métricas y Estadísticas</h1>
+              <p class="text-gray-600 mt-2">
+                Analiza el rendimiento de tus alojamientos
+              </p>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <label class="text-sm font-medium text-ink">Alojamiento</label>
+             <select
+  class="px-4 py-2 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+  [(ngModel)]="selectedAccommodationId"
+  (ngModelChange)="onAccommodationChange($event)"
+  [ngModelOptions]="{ standalone: true }"
+>
+  <option value="">Todos mis alojamientos</option>
+  <option *ngFor="let a of myAccommodations" [ngValue]="a.id">
+    {{ a.titulo }}
+  </option>
+</select>
+
+            </div>
+          </div>
+
           <app-card title="Filtros de fecha">
-            <form [formGroup]="dateForm" (ngSubmit)="loadMetrics()" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <form [formGroup]="dateForm" (ngSubmit)="onSubmitFilters()" class="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label class="block text-sm font-medium text-ink mb-2">Desde</label>
-                <input
-                  type="date"
-                  formControlName="desde"
-                  class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50"
-                />
+                <input type="date" formControlName="desde"
+                       class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50" />
               </div>
-
               <div>
                 <label class="block text-sm font-medium text-ink mb-2">Hasta</label>
-                <input
-                  type="date"
-                  formControlName="hasta"
-                  class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50"
-                />
+                <input type="date" formControlName="hasta"
+                       class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50" />
               </div>
-
               <div class="flex items-end">
                 <app-button type="submit" variant="primary" fullWidth [loading]="loading">
                   Actualizar métricas
@@ -65,7 +82,6 @@ interface MetricData {
             </form>
           </app-card>
 
-          <!-- Loading state -->
           <div *ngIf="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div *ngFor="let item of [1,2,3,4]" class="animate-pulse">
               <app-card>
@@ -77,13 +93,11 @@ interface MetricData {
             </div>
           </div>
 
-          <!-- Metrics cards -->
           <div *ngIf="!loading && metrics" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <app-card class="text-center">
               <div class="space-y-2">
                 <div class="w-12 h-12 mx-auto bg-primary bg-opacity-10 rounded-2xl flex items-center justify-center">
                   <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3a4 4 0 118 0v4m-4 9a3 3 0 100-6 3 3 0 000 6z"></path>
                   </svg>
                 </div>
@@ -129,14 +143,10 @@ interface MetricData {
             </app-card>
           </div>
 
-          <!-- Monthly chart -->
           <app-card title="Reservas por mes" *ngIf="!loading && metrics">
             <div class="space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div 
-                  *ngFor="let monthData of metrics.reservasPorMes" 
-                  class="bg-gray-50 rounded-xl p-4 text-center"
-                >
+                <div *ngFor="let monthData of metrics.reservasPorMes" class="bg-gray-50 rounded-xl p-4 text-center">
                   <h4 class="font-medium text-ink mb-2">{{ monthData.mes }}</h4>
                   <div class="space-y-1">
                     <p class="text-lg font-bold text-primary">{{ monthData.reservas }} reservas</p>
@@ -155,13 +165,19 @@ export class HostMetricsComponent implements OnInit {
   dateForm: FormGroup;
   metrics: MetricData | null = null;
   loading = true;
+  myAccommodations: Listing[] = [];
+  selectedAccommodationId: string = ''; // '' = todos
 
   constructor(
-    private fb: FormBuilder
+    private fb: FormBuilder,
+    private metricsService: MetricsService,
+    private toast: ToastService,
+    private bookingsService: BookingsService,
+    private listingsService: ListingsService
   ) {
     const today = new Date();
     const threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, today.getDate());
-    
+
     this.dateForm = this.fb.group({
       desde: [threeMonthsAgo.toISOString().split('T')[0]],
       hasta: [today.toISOString().split('T')[0]]
@@ -169,28 +185,149 @@ export class HostMetricsComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.loadMyAccommodations();
     this.loadMetrics();
+  }
+  private loadMyAccommodations(): void {
+    // Traemos hasta 100 alojamientos del host
+    this.listingsService.getHostListings(1, 100).subscribe({
+      next: (page) => {
+        this.myAccommodations = page.items ?? [];
+      },
+      error: (err) => {
+        console.error(err);
+        this.toast.showError('No se pudieron cargar tus alojamientos');
+      }
+    });
   }
 
   loadMetrics(): void {
     this.loading = true;
-    
-    // Mock metrics data
-    setTimeout(() => {
-      this.metrics = {
-        totalReservas: 24,
-        ingresosTotales: 2150,
-        ratingPromedio: 4.6,
-        ocupacionPromedio: 78,
-        reservasPorMes: [
-          { mes: 'Enero 2025', reservas: 8, ingresos: 720 },
-          { mes: 'Diciembre 2024', reservas: 12, ingresos: 1080 },
-          { mes: 'Noviembre 2024', reservas: 4, ingresos: 350 }
-        ]
-      };
-      this.loading = false;
-    }, 1000);
+    const { desde, hasta } = this.dateForm.value;
+
+    this.metricsService.getHostMetrics(desde, hasta).subscribe({
+      next: (m) => {
+        this.metrics = m;
+        this.loading = false;
+      },
+      error: (err) => {
+        console.error(err);
+        this.toast.showError('No se pudieron cargar las métricas');
+        this.loading = false;
+      }
+    });
   }
+  onAccommodationChange(newValue: string | number): void {
+  // Normalizamos a string
+  this.selectedAccommodationId = String(newValue || '');
+
+  if (!this.selectedAccommodationId) {
+    // Sin filtro → métricas globales (backend)
+    this.loadMetrics();
+  } else {
+    // Filtro por alojamiento → métricas calculadas en frontend
+    this.loadMetricsForAccommodation(this.selectedAccommodationId);
+  }
+}
+
+  private loadMetricsForAccommodation(accommodationId: string): void {
+    this.loading = true;
+    const { desde, hasta } = this.dateForm.value;
+
+    forkJoin({
+      bookings: this.bookingsService.getByAccommodation(accommodationId),
+      listing: this.listingsService.getListingById(accommodationId),
+      rating: this.listingsService.getAverageRating(accommodationId)
+        .pipe(catchError(() => of(0)))  // si falla rating, lo dejamos en 0
+    })
+      .pipe(
+        map(({ bookings, listing, rating }) => {
+          // 1) Filtrar por rango de fechas (opcional)
+          let filtered = bookings as Booking[];
+
+          if (desde) {
+            const from = new Date(desde);
+            filtered = filtered.filter(b => new Date(b.checkIn) >= from);
+          }
+
+          if (hasta) {
+            const to = new Date(hasta);
+            filtered = filtered.filter(b => new Date(b.checkOut) <= to);
+          }
+
+          const totalReservas = filtered.length;
+          const priceNight = listing?.precioNoche ?? 0;
+
+          let totalNochesReservadas = 0;
+          let ingresosTotales = 0;
+          const byMonth: Record<string, { reservas: number; ingresos: number }> = {};
+
+          filtered.forEach((b) => {
+            const start = new Date(b.checkIn);
+            const end = new Date(b.checkOut);
+
+            const diffMs = end.getTime() - start.getTime();
+            const nights = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+
+            totalNochesReservadas += nights;
+            const totalReserva = nights * priceNight;
+            ingresosTotales += totalReserva;
+
+            const mes = start.toISOString().slice(0, 7); // "YYYY-MM"
+            byMonth[mes] ??= { reservas: 0, ingresos: 0 };
+            byMonth[mes].reservas += 1;
+            byMonth[mes].ingresos += totalReserva;
+          });
+
+          // 2) Ocupación promedio dentro del rango [desde, hasta]
+          let ocupacionPromedio = 0;
+          if (desde && hasta) {
+            const dFrom = new Date(desde);
+            const dTo = new Date(hasta);
+            const diffMs = dTo.getTime() - dFrom.getTime();
+            const totalDiasPeriodo = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+            ocupacionPromedio = (totalNochesReservadas / totalDiasPeriodo) * 100;
+          }
+
+          // 3) Reservas por mes
+          const reservasPorMes = Object.entries(byMonth).map(([mes, data]) => ({
+            mes,
+            reservas: data.reservas,
+            ingresos: data.ingresos
+          }));
+
+          const metrics: MetricData = {
+            totalReservas,
+            ingresosTotales,
+            ratingPromedio: Number(rating ?? 0),
+            ocupacionPromedio,
+            reservasPorMes
+          };
+
+          return metrics;
+        })
+      )
+      .subscribe({
+        next: (m) => {
+          this.metrics = m;
+          this.loading = false;
+        },
+        error: (err) => {
+          console.error(err);
+          this.toast.showError('No se pudieron cargar las métricas del alojamiento');
+          this.loading = false;
+        }
+      });
+  }
+  onSubmitFilters(): void {
+    if (!this.selectedAccommodationId) {
+      this.loadMetrics();
+    } else {
+      this.loadMetricsForAccommodation(this.selectedAccommodationId);
+    }
+  }
+
+
 
   formatPrice = formatPrice;
 }

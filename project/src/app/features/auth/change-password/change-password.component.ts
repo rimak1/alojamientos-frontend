@@ -9,6 +9,7 @@ import { CardComponent } from '../../../shared/ui/card/card.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { isValidPassword } from '../../../core/utils/validation.utils';
+import type { ChangePasswordRequest } from '../../../core/models/user.model';
 
 @Component({
   selector: 'app-change-password',
@@ -105,26 +106,40 @@ export class ChangePasswordComponent {
       confirmPassword: ['', Validators.required]
     }, { validators: this.passwordMatchValidator });
   }
+ onSubmit(): void {
+  if (this.changePasswordForm.valid && !this.loading) {
+    this.loading = true;
 
-  onSubmit(): void {
-    if (this.changePasswordForm.valid && !this.loading) {
-      this.loading = true;
-      
-      const { confirmPassword, ...changeData } = this.changePasswordForm.value;
-      
-      this.authService.changePassword(changeData).subscribe({
-        next: () => {
-          this.loading = false;
-          this.toastService.showSuccess('¡Contraseña cambiada exitosamente!');
-          this.router.navigate(['/perfil']);
-        },
-        error: (error) => {
-          this.loading = false;
-          this.toastService.showError('Contraseña actual incorrecta');
-        }
-      });
-    }
+    const form = this.changePasswordForm.value;
+
+    const payload: ChangePasswordRequest = {
+      currentPassword: form.passwordActual,
+      newPassword: form.nuevaPassword,
+      confirmPassword: form.confirmPassword
+    };
+
+    const user = this.authService.getCurrentUser();
+
+    const request$ =
+      user?.rol === 'ANFITRION'
+        ? this.authService.changeMyHostPassword(payload)
+        : this.authService.changeMyGuestPassword(payload);
+
+    request$.subscribe({
+      next: () => {
+        this.loading = false;
+        this.toastService.showSuccess('¡Contraseña cambiada exitosamente!');
+        this.router.navigate(['/perfil']);
+      },
+      error: (error) => {
+        this.loading = false;
+        console.error(error);
+        this.toastService.showError('Error al cambiar la contraseña. Verifica tus datos.');
+      }
+    });
   }
+}
+
 
   getFieldError(fieldName: string): string {
     const field = this.changePasswordForm.get(fieldName);
@@ -155,7 +170,7 @@ export class ChangePasswordComponent {
   private passwordMatchValidator(group: any) {
     const password = group.get('nuevaPassword')?.value;
     const confirmPassword = group.get('confirmPassword')?.value;
-    
+
     if (password && confirmPassword && password !== confirmPassword) {
       group.get('confirmPassword')?.setErrors({ passwordMismatch: true });
     }

@@ -9,6 +9,9 @@ import { InputComponent } from '../../shared/ui/input/input.component';
 import { CardComponent } from '../../shared/ui/card/card.component';
 import { BadgeComponent } from '../../shared/ui/badge/badge.component';
 import { StarRatingComponent } from '../../shared/ui/star-rating/star-rating.component';
+import { forkJoin, of } from 'rxjs';
+import { switchMap, map, catchError } from 'rxjs/operators';
+
 
 import { ListingsService } from '../../core/services/listings.service';
 import { AuthService } from '../../core/services/auth.service';
@@ -188,12 +191,10 @@ export class HomeComponent implements OnInit {
   searchForm: FormGroup;
   featuredListings: Listing[] = [];
   loading = true;
-  currentUser: User | null = null;
 
   constructor(
     private fb: FormBuilder,
     private listingsService: ListingsService,
-    private authService: AuthService,
     public router: Router
   ) {
     this.searchForm = this.fb.group({
@@ -202,7 +203,6 @@ export class HomeComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.currentUser = this.authService.getCurrentUser();
     this.loadFeaturedListings();
   }
 
@@ -212,11 +212,55 @@ export class HomeComponent implements OnInit {
   }
 
   loadFeaturedListings(): void {
-    this.listingsService.searchListings({}, 1, 6).subscribe(response => {
-      this.featuredListings = response.items;
-      this.loading = false;
+    this.loading = true;
+
+    this.listingsService.searchListings({}, 1, 6).subscribe({
+      next: (resp) => {
+        const baseItems = resp.items ?? [];
+
+        // Mostrar al menos la lista base de alojamientos
+        this.featuredListings = baseItems;
+        this.loading = false;
+
+        if (!baseItems.length) {
+          return;
+        }
+
+        // Ahora enriquecemos en segundo plano con imagen principal + rating
+        const perItem$ = baseItems.map(listing =>
+          forkJoin({
+            img: this.listingsService.getMainImageUrl(listing.id)
+              .pipe(catchError(() => of(''))),
+            rating: this.listingsService.getAverageRating(listing.id)
+              .pipe(catchError(() => of(undefined)))
+          }).pipe(
+            map(({ img, rating }) => ({
+              ...listing,
+              imagenes: img ? [{ url: img, principal: true }] : listing.imagenes,
+              ratingPromedio: typeof rating === 'number' ? rating : listing.ratingPromedio
+            }))
+          )
+        );
+
+        forkJoin(perItem$).subscribe({
+          next: (enriched: Listing[]) => {
+            this.featuredListings = enriched;
+          },
+          error: (err) => {
+            console.error('Error enriqueciendo alojamientos destacados', err);
+            // Si falla el enriquecimiento, dejamos los baseItems ya mostrados
+          }
+        });
+      },
+      error: (err) => {
+        console.error('Error cargando alojamientos destacados', err);
+        this.featuredListings = [];
+        this.loading = false;
+      }
     });
   }
+
+
 
   goToListing(id: string): void {
     this.router.navigate(['/alojamientos', id]);

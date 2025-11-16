@@ -68,7 +68,8 @@ export const routes: Routes = [
       },
       {
         path: 'metricas',
-        loadComponent: () => import('./features/host/metrics/host-metrics.component').then(m => m.HostMetricsComponent)
+        loadComponent: () => import('./features/host/metrics/host-metrics.component')
+          .then(m => m.HostMetricsComponent)
       }
     ]
   },

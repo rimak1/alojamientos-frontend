@@ -1,202 +1,140 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, of, delay, map } from 'rxjs';
+import { map, Observable } from 'rxjs';
+import { environment } from '../../../../environments/environment';
 import type { Listing, CreateListingRequest, UpdateListingRequest } from '../models/listing.model';
-import type { Pagination, SearchFilters } from '../models/common.model';
+import type { Pagination } from '../models/common.model';
+import { mapAccommodationFromApi, mapAccommodationToApi } from '../mappers/accommodation.mapper';
+import { AuthService } from './auth.service';
+import type { SearchFilters } from '../models/common.model';
 
-@Injectable({
-  providedIn: 'root'
-})
+
+type SpringPage<T> = {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+};
+
+@Injectable({ providedIn: 'root' })
 export class ListingsService {
-  private readonly API_URL = 'https://api.alojamientos.com';
+  private readonly API = `${environment.apiBaseUrl}/accommodation`;
 
-  constructor(private http: HttpClient) {}
+    private readonly API_BASE = `${environment.apiBaseUrl}`;
+  private readonly API_ACCOMMODATIONS = `${this.API_BASE}/accommodation`;
+  constructor(private http: HttpClient, private auth: AuthService) { }
 
   /**
-   * Buscar alojamientos con filtros y paginación
+   * Buscar alojamientos desde el backend (paginado).
+   * Los filtros complejos los aplicaremos en el frontend.
    */
-  searchListings(filters: SearchFilters, page: number = 1, pageSize: number = 10): Observable<Pagination<Listing>> {
-    // Mock data
-    const mockListings: Listing[] = [
-      {
-        id: '1',
-        titulo: 'Apartamento moderno en el centro',
-        descripcion: 'Hermoso apartamento totalmente equipado en el corazón de la ciudad.',
-        ciudad: 'Madrid',
-        direccion: 'Calle Gran Vía 15',
-        lat: 40.4168,
-        lng: -3.7038,
-        precioNoche: 89,
-        capacidadMax: 4,
-        servicios: ['WiFi', 'Aire acondicionado', 'Cocina equipada'],
-        imagenes: [
-          { url: 'https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=800', principal: true },
-          { url: 'https://images.pexels.com/photos/1571468/pexels-photo-1571468.jpeg?auto=compress&cs=tinysrgb&w=800', principal: false }
-        ],
-        estado: 'ACTIVO',
-        anfitrionId: '1',
-        ratingPromedio: 4.5
-      },
-      {
-        id: '2',
-        titulo: 'Casa rural con vistas al mar',
-        descripcion: 'Tranquila casa rural perfecta para desconectar, con increíbles vistas al océano.',
-        ciudad: 'Santander',
-        direccion: 'Camino del Faro 23',
-        lat: 43.4623,
-        lng: -3.8099,
-        precioNoche: 120,
-        capacidadMax: 6,
-        servicios: ['WiFi', 'Jardín', 'Parking gratuito', 'Barbacoa'],
-        imagenes: [
-          { url: 'https://images.pexels.com/photos/1396122/pexels-photo-1396122.jpeg?auto=compress&cs=tinysrgb&w=800', principal: true }
-        ],
-        estado: 'ACTIVO',
-        anfitrionId: '2',
-        ratingPromedio: 4.8
-      }
-    ];
+ searchListings(
+    filters: SearchFilters,
+    page = 1,
+    pageSize = 10
+  ): Observable<Pagination<Listing>> {
+    let params = new HttpParams()
+      .set('page', String(page - 1))   // backend usa base 0
+      .set('size', String(pageSize));
 
-    // Apply filters
-    let filteredListings = mockListings.filter(listing => 
-      listing.estado === 'ACTIVO' &&
-      (!filters.ciudad || listing.ciudad.toLowerCase().includes(filters.ciudad.toLowerCase())) &&
-      (!filters.precioMin || listing.precioNoche >= filters.precioMin) &&
-      (!filters.precioMax || listing.precioNoche <= filters.precioMax) &&
-      (!filters.servicios?.length || filters.servicios.some(servicio => listing.servicios.includes(servicio)))
-    );
+    // Si luego quieres mandar ciudad al back:
+    // if (filters?.ciudad) {
+    //   params = params.set('city', filters.ciudad);
+    // }
 
-    // Apply pagination
-    const startIndex = (page - 1) * pageSize;
-    const items = filteredListings.slice(startIndex, startIndex + pageSize);
-
-    return of({
-      items,
-      page,
-      pageSize,
-      total: filteredListings.length,
-      totalPages: Math.ceil(filteredListings.length / pageSize)
-    }).pipe(delay(500));
-
-    // Real implementation would be:
-    // let params = new HttpParams()
-    //   .set('page', page.toString())
-    //   .set('size', pageSize.toString());
-    
-    // if (filters.ciudad) params = params.set('ciudad', filters.ciudad);
-    // if (filters.fechaInicio) params = params.set('fechaInicio', filters.fechaInicio);
-    // if (filters.fechaFin) params = params.set('fechaFin', filters.fechaFin);
-    // if (filters.precioMin) params = params.set('precioMin', filters.precioMin.toString());
-    // if (filters.precioMax) params = params.set('precioMax', filters.precioMax.toString());
-    // if (filters.servicios?.length) params = params.set('servicios', filters.servicios.join(','));
-
-    // return this.http.get<Pagination<Listing>>(`${this.API_URL}/alojamientos`, { params });
+    return this.http
+      .get<SpringPage<any>>(this.API_ACCOMMODATIONS, { params })
+      .pipe(
+        map(p => ({
+          items: (p.content ?? []).map(mapAccommodationFromApi),
+          page: (p.number ?? 0) + 1,
+          pageSize: p.size ?? pageSize,
+          total: p.totalElements ?? (p.content?.length ?? 0),
+          totalPages: p.totalPages ?? 1
+        }))
+      );
   }
 
-  /**
-   * Obtener detalle de un alojamiento
-   */
+
+
+  /**  Obtener alojamiento por ID */
   getListingById(id: string): Observable<Listing> {
-    const mockListing: Listing = {
-      id,
-      titulo: 'Apartamento moderno en el centro',
-      descripcion: 'Hermoso apartamento totalmente equipado en el corazón de la ciudad. Perfecto para una estancia cómoda con todas las comodidades necesarias.',
-      ciudad: 'Madrid',
-      direccion: 'Calle Gran Vía 15',
-      lat: 40.4168,
-      lng: -3.7038,
-      precioNoche: 89,
-      capacidadMax: 4,
-      servicios: ['WiFi', 'Aire acondicionado', 'Cocina equipada', 'TV', 'Lavadora'],
-      imagenes: [
-        { url: 'https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=800', principal: true },
-        { url: 'https://images.pexels.com/photos/1571468/pexels-photo-1571468.jpeg?auto=compress&cs=tinysrgb&w=800', principal: false },
-        { url: 'https://images.pexels.com/photos/1571453/pexels-photo-1571453.jpeg?auto=compress&cs=tinysrgb&w=800', principal: false }
-      ],
-      estado: 'ACTIVO',
-      anfitrionId: '1',
-      ratingPromedio: 4.5
-    };
-
-    return of(mockListing).pipe(delay(600));
+    return this.http.get<any>(`${this.API}/${id}`).pipe(map(mapAccommodationFromApi));
   }
 
-  /**
-   * Obtener alojamientos del anfitrión actual
-   */
-  getHostListings(): Observable<Listing[]> {
-    const mockListings: Listing[] = [
-      {
-        id: '1',
-        titulo: 'Apartamento moderno en el centro',
-        descripcion: 'Hermoso apartamento totalmente equipado.',
-        ciudad: 'Madrid',
-        direccion: 'Calle Gran Vía 15',
-        lat: 40.4168,
-        lng: -3.7038,
-        precioNoche: 89,
-        capacidadMax: 4,
-        servicios: ['WiFi', 'Aire acondicionado'],
-        imagenes: [
-          { url: 'https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=400', principal: true }
-        ],
-        estado: 'ACTIVO',
-        anfitrionId: '1',
-        ratingPromedio: 4.5
-      }
-    ];
-
-    return of(mockListings).pipe(delay(500));
+  /**  Obtener alojamientos por ciudad */
+  getByCity(city: string): Observable<Listing[]> {
+    return this.http
+      .get<any[]>(`${this.API}/city/${encodeURIComponent(city)}`)
+      .pipe(map(arr => arr.map(mapAccommodationFromApi)));
   }
 
-  /**
-   * Crear nuevo alojamiento
-   */
-  createListing(listingData: CreateListingRequest): Observable<Listing> {
-    return of({
-      id: Date.now().toString(),
-      ...listingData,
-      estado: 'ACTIVO' as const,
-      anfitrionId: '1'
-    }).pipe(delay(1000));
+  /**  Crear alojamiento (el backend obtiene el host desde el token JWT) */
+  createListing(body: CreateListingRequest): Observable<Listing> {
+    const current = this.auth.getCurrentUser();
+    if (!current) {
+      throw new Error('Usuario no autenticado');
+    }
+
+    const hostId = Number(current.id);
+    const apiBody = mapAccommodationToApi(body, hostId);
+
+    return this.http.post<any>(this.API, apiBody).pipe(
+      map(mapAccommodationFromApi)
+    );
   }
 
-  /**
-   * Actualizar alojamiento existente
-   */
-  updateListing(listingData: UpdateListingRequest): Observable<Listing> {
-    return of({
-      ...listingData,
-      estado: 'ACTIVO' as const,
-      anfitrionId: '1'
-    }).pipe(delay(1000));
+  /**  Actualizar alojamiento existente */
+  updateListing(req: UpdateListingRequest): Observable<Listing> {
+    const current = this.auth.getCurrentUser();
+    if (!current) {
+      throw new Error('Usuario no autenticado');
+    }
+
+    const hostId = Number(current.id);
+    const apiBody = mapAccommodationToApi(req, hostId);
+
+    return this.http.put<any>(`${this.API}/${req.id}`, apiBody).pipe(
+      map(mapAccommodationFromApi)
+    );
   }
 
-  /**
-   * Eliminar alojamiento (soft delete)
-   */
+  /**  Obtener alojamientos del anfitrión actual */
+  getHostListings(
+    page = 1,
+    pageSize = 6
+  ): Observable<Pagination<Listing>> {
+    let params = new HttpParams()
+      .set('page', String(page - 1))  // back en base 0
+      .set('size', String(pageSize));
+
+    return this.http
+      .get<SpringPage<any>>(`${this.API_ACCOMMODATIONS}/host`, { params })
+      .pipe(
+        map((p) => ({
+          items: (p.content ?? []).map(mapAccommodationFromApi),
+          page: (p.number ?? 0) + 1,
+          pageSize: p.size ?? pageSize,
+          total: p.totalElements ?? (p.content?.length ?? 0),
+          totalPages: p.totalPages ?? 1
+        }))
+      );
+  }
+
+
+  /**  Eliminar alojamiento */
   deleteListing(id: string): Observable<void> {
-    return of(void 0).pipe(delay(500));
+    return this.http.delete<void>(`${this.API}/${id}`);
   }
 
-  /**
-   * Obtener ciudades para autocompletado
-   */
-  getCities(query: string): Observable<string[]> {
-    const cities = ['Madrid', 'Barcelona', 'Sevilla', 'Valencia', 'Bilbao', 'Málaga', 'Granada', 'Santander'];
-    return of(cities.filter(city => 
-      city.toLowerCase().includes(query.toLowerCase())
-    )).pipe(delay(300));
+  /**  Obtener URL de imagen principal */
+  getMainImageUrl(id: string): Observable<string> {
+    return this.http.get(`${this.API}/${id}/main-image`, { responseType: 'text' });
   }
 
-  /**
-   * Obtener servicios disponibles
-   */
-  getServices(): Observable<string[]> {
-    return of([
-      'WiFi', 'Aire acondicionado', 'Cocina equipada', 'TV', 
-      'Lavadora', 'Parking gratuito', 'Jardín', 'Piscina',
-      'Gimnasio', 'Spa', 'Barbacoa', 'Terraza'
-    ]);
+  /**  Obtener calificación promedio */
+  getAverageRating(id: string): Observable<number> {
+    return this.http.get<number>(`${this.API}/${id}/ratings/average`);
   }
 }

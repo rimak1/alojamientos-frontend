@@ -11,6 +11,11 @@ import { PaginationComponent } from '../../../shared/ui/pagination/pagination.co
 import { BookingsService } from '../../../core/services/bookings.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { formatPrice, formatDateShort, getDaysDifference } from '../../../core/utils/validation.utils';
+import { forkJoin, of } from 'rxjs';
+import { switchMap, map, catchError } from 'rxjs/operators';
+import { ListingsService } from '../../../core/services/listings.service';
+
+
 import type { Booking, BookingFilters } from '../../../core/models/booking.model';
 
 @Component({
@@ -217,11 +222,14 @@ import type { Booking, BookingFilters } from '../../../core/models/booking.model
     </app-modal>
   `
 })
+
+
 export class UserBookingsComponent implements OnInit {
   filtersForm: FormGroup;
   bookings: Booking[] = [];
+  allBookings: Booking[] = [];
   loading = true;
-  
+
   currentPage = 1;
   pageSize = 10;
   totalResults = 0;
@@ -230,9 +238,31 @@ export class UserBookingsComponent implements OnInit {
   cancelLoading = false;
   bookingToCancel: Booking | null = null;
 
+  private mapApiToEs(api: string): Booking['estado'] {
+    const m: Record<string, Booking['estado']> = {
+      PENDING: 'PENDIENTE',
+      CONFIRMED: 'CONFIRMADA',
+      PAID: 'CONFIRMADA',      // el back puede usar PAID; en UI lo mostramos como confirmada
+      CANCELED: 'CANCELADA',
+      COMPLETED: 'COMPLETADA'
+    };
+    return m[api] ?? (api as Booking['estado']);
+  }
+
+  private mapEsToApi(es: string): string | undefined {
+    const m: Record<Booking['estado'], string> = {
+      PENDIENTE: 'PENDING',
+      CONFIRMADA: 'CONFIRMED',
+      CANCELADA: 'CANCELED',
+      COMPLETADA: 'COMPLETED'
+    };
+    return (es as Booking['estado']) in m ? m[es as Booking['estado']] : undefined;
+  }
+
   constructor(
     private fb: FormBuilder,
     private bookingsService: BookingsService,
+    private listingsService: ListingsService,
     private toastService: ToastService
   ) {
     this.filtersForm = this.fb.group({
@@ -248,37 +278,131 @@ export class UserBookingsComponent implements OnInit {
 
   loadBookings(): void {
     this.loading = true;
+
+    // Tomamos los filtros del form, pero solo usaremos estado/fechas en el front
+    const f = this.filtersForm.value;
+    const estadoApi = f.estado ? this.mapEsToApi(f.estado) : undefined;
+
     const filters: BookingFilters = {
-      ...this.filtersForm.value,
+      ...f,
+      estado: estadoApi,   // por si en un futuro el back lo soporta
       propias: true
     };
 
-    this.bookingsService.getBookings(filters, this.currentPage, this.pageSize).subscribe(response => {
-      this.bookings = response.items;
-      this.totalResults = response.total;
-      this.loading = false;
+    // Pedimos una página grande (p.ej. 1000) y paginamos en el front
+    this.bookingsService.getBookings(filters, 1, 1000).pipe(
+      switchMap((response) => {
+        const items = response.items || [];
+        if (!items.length) {
+          this.allBookings = [];
+          this.totalResults = 0;
+          return of([] as Booking[]);
+        }
+
+        const perItem$ = items.map((b) =>
+          forkJoin({
+            acc: this.listingsService.getListingById(b.alojamientoId)
+              .pipe(catchError(() => of(null))),
+            img: this.listingsService.getMainImageUrl(b.alojamientoId)
+              .pipe(catchError(() => of('')))
+          }).pipe(
+            map(({ acc, img }) => {
+              const alojamiento = acc
+                ? {
+                    titulo: acc.titulo,
+                    ciudad: acc.ciudad,
+                    precioNoche: acc.precioNoche,
+                    imagenPrincipal: img || undefined
+                  }
+                : b.alojamiento; // fallback si algo falla
+
+              return {
+                ...b,
+                estado: this.mapApiToEs(String(b.estado)), // normaliza a español para la UI
+                alojamiento
+              } as Booking;
+            })
+          )
+        );
+
+        return forkJoin(perItem$);
+      })
+    ).subscribe({
+      next: (enriched) => {
+        this.allBookings = enriched;  
+        this.loading = false;
+        this.updatePagedBookings();    
+      },
+      error: (err) => {
+        console.error(err);
+        this.allBookings = [];
+        this.bookings = [];
+        this.totalResults = 0;
+        this.loading = false;
+      }
     });
   }
+    /**
+   * Aplica los filtros del formulario sobre allBookings
+   * y actualiza this.bookings con la página actual.
+   */
+  private updatePagedBookings(): void {
+    const f = this.filtersForm.value;
+    const estadoFiltro: Booking['estado'] | '' = f.estado;
+    const desdeStr: string | '' = f.desde;
+    const hastaStr: string | '' = f.hasta;
+
+    let filtered = [...this.allBookings];
+
+    // Filtro por estado (en español: PENDIENTE, CONFIRMADA, etc.)
+    if (estadoFiltro) {
+      filtered = filtered.filter(b => b.estado === estadoFiltro);
+    }
+
+    // Filtro por fecha "desde" (check-in >= desde)
+    if (desdeStr) {
+      const desde = new Date(desdeStr);
+      filtered = filtered.filter(b => new Date(b.checkIn) >= desde);
+    }
+
+    // Filtro por fecha "hasta" (check-out <= hasta)
+    if (hastaStr) {
+      const hasta = new Date(hastaStr);
+      filtered = filtered.filter(b => new Date(b.checkOut) <= hasta);
+    }
+
+    // Actualizamos conteo total para el componente de paginación
+    this.totalResults = filtered.length;
+
+    // Paginación en memoria
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const endIndex = startIndex + this.pageSize;
+
+    this.bookings = filtered.slice(startIndex, endIndex);
+  }
+
+
+
 
   applyFilters(): void {
     this.currentPage = 1;
-    this.loadBookings();
+    this.updatePagedBookings();
   }
 
   onPageChange(page: number): void {
     this.currentPage = page;
-    this.loadBookings();
+    this.updatePagedBookings();
   }
 
   canCancelBooking(booking: Booking): boolean {
     if (booking.estado !== 'PENDIENTE' && booking.estado !== 'CONFIRMADA') {
       return false;
     }
-    
+
     const checkInDate = new Date(booking.checkIn);
     const now = new Date();
     const hoursUntilCheckIn = (checkInDate.getTime() - now.getTime()) / (1000 * 60 * 60);
-    
+
     return hoursUntilCheckIn >= 48;
   }
 
@@ -290,7 +414,7 @@ export class UserBookingsComponent implements OnInit {
   cancelBooking(): void {
     if (this.bookingToCancel && !this.cancelLoading) {
       this.cancelLoading = true;
-      
+
       this.bookingsService.cancelBooking(this.bookingToCancel.id).subscribe({
         next: () => {
           this.cancelLoading = false;

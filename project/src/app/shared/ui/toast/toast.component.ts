@@ -13,7 +13,7 @@ import type { ToastMessage } from '../../../core/models/common.model';
       <div
         *ngFor="let toast of toasts"
         [class]="getToastClasses(toast.type)"
-        class="max-w-sm w-full shadow-strong rounded-2xl p-4 fade-in"
+        class="max-w-2xl w-full shadow-strong rounded-2xl p-4 fade-in"
       >
         <div class="flex items-start">
           <div class="flex-shrink-0">

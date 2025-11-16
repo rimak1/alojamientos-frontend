@@ -164,22 +164,47 @@ export class RegisterComponent {
   }
 
   onSubmit(): void {
-    if (this.registerForm.valid && !this.loading) {
-      this.loading = true;
-      
-      this.authService.register(this.registerForm.value).subscribe({
-        next: (response) => {
-          this.loading = false;
-          this.toastService.showSuccess('¡Cuenta creada exitosamente!');
-          this.router.navigate(['/']);
-        },
-        error: (error) => {
-          this.loading = false;
-          this.toastService.showError(error.error || 'Error al crear la cuenta');
-        }
-      });
+    if (this.registerForm.invalid || this.loading) {
+      this.registerForm.markAllAsTouched();
+      return;
     }
+
+    this.loading = true;
+    const formData = this.registerForm.value;
+
+    const register$ = formData.rol === 'ANFITRION'
+      ? this.authService.registerHost({
+        nombre: formData.nombre,
+        email: formData.email,
+        password: formData.password,
+        telefono: formData.telefono,
+        rol: formData.rol,
+        fechaNacimiento: formData.fechaNacimiento
+      })
+      : this.authService.registerGuest({
+        nombre: formData.nombre,
+        email: formData.email,
+        password: formData.password,
+        telefono: formData.telefono,
+        rol: formData.rol,
+        fechaNacimiento: formData.fechaNacimiento
+      });
+
+    register$.subscribe({
+      next: () => {
+        this.loading = false;
+        this.toastService.showSuccess('¡Cuenta creada exitosamente!');
+        this.router.navigate(['/auth/login']);
+      },
+      error: (error) => {
+        this.loading = false;
+        console.error(error);
+        this.toastService.showError('Error al crear la cuenta');
+      }
+    });
   }
+
+
 
   selectRole(role: 'USUARIO' | 'ANFITRION'): void {
     this.registerForm.patchValue({ rol: role });
@@ -188,7 +213,7 @@ export class RegisterComponent {
   getRoleButtonClasses(role: 'USUARIO' | 'ANFITRION'): string {
     const isSelected = this.registerForm.get('rol')?.value === role;
     const baseClasses = 'p-4 border-2 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary';
-    
+
     return isSelected
       ? `${baseClasses} border-primary bg-primary bg-opacity-10 text-primary`
       : `${baseClasses} border-gray-300 text-gray-600 hover:border-primary hover:text-primary`;

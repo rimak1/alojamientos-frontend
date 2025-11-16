@@ -10,10 +10,11 @@ export interface SearchFilters {
   ciudad?: string;
   fechaInicio?: string;
   fechaFin?: string;
-  precioMin?: number;
-  precioMax?: number;
+  precioMin?: number | string | null;
+  precioMax?: number | string | null;
   servicios?: string[];
 }
+
 
 export interface ApiResponse<T> {
   success: boolean;

@@ -17,6 +17,10 @@ import { ToastService } from '../../../core/services/toast.service';
 import { formatPrice, formatDate, getDaysDifference } from '../../../core/utils/validation.utils';
 import type { Listing } from '../../../core/models/listing.model';
 import type { Review } from '../../../core/models/review.model';
+import type { CreateReviewRequest } from '../../../core/models/review.model';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+
+
 
 @Component({
   selector: 'app-listing-detail',
@@ -89,15 +93,25 @@ import type { Review } from '../../../core/models/review.model';
             </app-card>
 
             <!-- Location -->
-            <app-card title="Ubicación">
-              <p class="text-gray-700 mb-4">{{ listing.direccion }}, {{ listing.ciudad }}</p>
-              <iframe
-                [src]="'https://www.openstreetmap.org/export/embed.html?bbox=' + (listing.lng-0.01) + ',' + (listing.lat-0.01) + ',' + (listing.lng+0.01) + ',' + (listing.lat+0.01) + '&layer=mapnik&marker=' + listing.lat + ',' + listing.lng"
-                class="w-full h-64 rounded-xl"
-                frameborder="0"
-                title="Ubicación del alojamiento"
-              ></iframe>
-            </app-card>
+<app-card title="Ubicación">
+  <p class="text-gray-700 mb-4">{{ listing.direccion }}, {{ listing.ciudad }}</p>
+
+  <ng-container *ngIf="mapUrl; else noMap">
+    <iframe
+      [src]="mapUrl"
+      class="w-full h-64 rounded-xl"
+      frameborder="0"
+      title="Ubicación del alojamiento"
+    ></iframe>
+  </ng-container>
+
+  <ng-template #noMap>
+    <p class="text-sm text-gray-500">
+      No hay información suficiente de ubicación para mostrar el mapa.
+    </p>
+  </ng-template>
+</app-card>
+
 
             <!-- Reviews -->
             <app-card [title]="'Reseñas (' + reviews.length + ')'">
@@ -136,6 +150,58 @@ import type { Review } from '../../../core/models/review.model';
                   <p class="text-gray-600">Aún no hay reseñas para este alojamiento</p>
                 </div>
               </ng-template>
+              <hr class="my-6 border-gray-100">
+
+<div *ngIf="canReview; else loginToReview">
+  <h4 class="text-lg font-semibold text-ink mb-4">Deja tu reseña</h4>
+
+  <form [formGroup]="reviewForm" (ngSubmit)="onSubmitReview()" class="space-y-4">
+  <!-- Dentro del formulario de reseña -->
+<div class="space-y-2">
+  <label class="block text-sm font-medium text-ink mb-1">Tu valoración</label>
+  <app-star-rating
+    [rating]="reviewForm.get('rating')?.value"
+    (ratingChange)="reviewForm.get('rating')?.setValue($event)"
+  ></app-star-rating>
+</div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-2">Puntuación</label>
+      <select
+        formControlName="rating"
+        class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        <option *ngFor="let r of [1,2,3,4,5]" [value]="r">{{ r }} estrella(s)</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-2">Comentario</label>
+      <textarea
+        formControlName="texto"
+        rows="4"
+        class="w-full px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+        placeholder="Cuenta tu experiencia..."
+      ></textarea>
+    </div>
+
+    <app-button
+      type="submit"
+      variant="primary"
+      [disabled]="reviewForm.invalid || submittingReview"
+      [loading]="submittingReview"
+    >
+      Enviar reseña
+    </app-button>
+  </form>
+</div>
+
+<ng-template #loginToReview>
+  <p class="text-sm text-gray-600 mt-4">
+    Inicia sesión como huésped para dejar una reseña.
+  </p>
+</ng-template>
+
             </app-card>
           </div>
 
@@ -210,13 +276,16 @@ import type { Review } from '../../../core/models/review.model';
                       <span class="ml-4 text-green-500">●</span> Disponible
                     </p>
                     <!-- Simple calendar placeholder -->
-                    <div class="grid grid-cols-7 gap-1 mt-4 text-xs">
-                      <div *ngFor="let day of calendarDays" 
-                           [class]="getCalendarDayClasses(day)"
-                           class="h-8 flex items-center justify-center rounded">
-                        {{ day.day }}
-                      </div>
-                    </div>
+                   <div class="grid grid-cols-7 gap-1 mt-4 text-xs">
+  <div
+    *ngFor="let day of calendarDays"
+    [ngClass]="getCalendarDayClasses(day)"
+    (click)="onCalendarDayClick(day)"
+  >
+    {{ day.day }}
+  </div>
+</div>
+
                   </div>
                 </div>
               </app-card>
@@ -251,6 +320,13 @@ export class ListingDetailComponent implements OnInit {
   bookingLoading = false;
   occupiedDates: string[] = [];
   calendarDays: any[] = [];
+  reviewForm: FormGroup;
+  submittingReview = false;
+  reservaId: string | null = null;
+  currentMonth = new Date().getMonth();
+  currentYear = new Date().getFullYear();
+   selectedCheckIn: string | null = null;   // 'YYYY-MM-DD'
+  selectedCheckOut: string | null = null;
 
   constructor(
     private fb: FormBuilder,
@@ -260,17 +336,41 @@ export class ListingDetailComponent implements OnInit {
     private bookingsService: BookingsService,
     private reviewsService: ReviewsService,
     private authService: AuthService,
-    private toastService: ToastService
+    private toastService: ToastService,
+    private sanitizer: DomSanitizer
+
+
   ) {
     this.bookingForm = this.fb.group({
       checkIn: ['', Validators.required],
       checkOut: ['', Validators.required],
       huespedes: [1, [Validators.required, Validators.min(1)]]
     });
+    this.reviewForm = this.fb.group({
+      rating: [5, [Validators.required, Validators.min(1), Validators.max(5)]],
+      texto: ['', [Validators.required, Validators.minLength(10)]]
+    });
   }
+  mapUrl: SafeResourceUrl | null = null;
+
+  get canReview(): boolean {
+    const user = this.authService.getCurrentUser();
+
+    if (!user || !this.listing) return false;
+
+    // Solo huéspedes, no el anfitrión del alojamiento
+    return user.rol === 'USUARIO' && String(user.id) !== this.listing.anfitrionId;
+  }
+
+
 
   ngOnInit(): void {
     const listingId = this.route.snapshot.paramMap.get('id');
+
+    this.route.queryParams.subscribe(params => {
+      this.reservaId = params['reservaId'] ?? null;
+    });
+
     if (listingId) {
       this.loadListing(listingId);
       this.loadReviews(listingId);
@@ -280,6 +380,7 @@ export class ListingDetailComponent implements OnInit {
     this.generateCalendar();
   }
 
+
   get isAuthenticated(): boolean {
     return this.authService.isAuthenticated();
   }
@@ -287,7 +388,7 @@ export class ListingDetailComponent implements OnInit {
   get totalNights(): number {
     const checkIn = this.bookingForm.get('checkIn')?.value;
     const checkOut = this.bookingForm.get('checkOut')?.value;
-    
+
     if (checkIn && checkOut) {
       return getDaysDifference(checkIn, checkOut);
     }
@@ -301,16 +402,38 @@ export class ListingDetailComponent implements OnInit {
     return 0;
   }
 
-  loadListing(id: string): void {
-    this.listingsService.getListingById(id).subscribe(listing => {
-      this.listing = listing;
-      this.bookingForm.get('huespedes')?.setValidators([
-        Validators.required,
-        Validators.min(1),
-        Validators.max(listing.capacidadMax)
-      ]);
-    });
-  }
+loadListing(id: string): void {
+  this.listingsService.getListingById(id).subscribe(listing => {
+    this.listing = listing;
+
+    // Validar que lat/lng sean válidos
+    const lat = Number(listing.lat);
+    const lng = Number(listing.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      this.mapUrl = null;
+    } else {
+      const delta = 0.01;
+      const bbox = [
+        lng - delta,
+        lat - delta,
+        lng + delta,
+        lat + delta
+      ].join(',');
+
+      const url = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lng}`;
+
+      this.mapUrl = this.sanitizer.bypassSecurityTrustResourceUrl(url);
+    }
+
+    this.bookingForm.get('huespedes')?.setValidators([
+      Validators.required,
+      Validators.min(1),
+      Validators.max(listing.capacidadMax)
+    ]);
+  });
+}
+
 
   loadReviews(alojamientoId: string): void {
     this.reviewsService.getListingReviews(alojamientoId).subscribe(reviews => {
@@ -319,21 +442,37 @@ export class ListingDetailComponent implements OnInit {
   }
 
   loadOccupiedDates(alojamientoId: string): void {
-    this.bookingsService.getOccupiedDates(alojamientoId).subscribe(dates => {
+    this.bookingsService.getOccupiedDates(alojamientoId).subscribe((dates: string[]) => {
       this.occupiedDates = dates;
       this.generateCalendar();
     });
   }
 
-  onBooking(): void {
+    onBooking(): void {
     if (!this.isAuthenticated) {
       this.router.navigate(['/auth/login']);
       return;
     }
 
-    if (this.bookingForm.valid && this.listing && !this.bookingLoading) {
+    if (!this.listing) {
+      this.toastService.showError('Alojamiento no cargado');
+      return;
+    }
+
+    if (this.bookingForm.invalid) {
+      this.bookingForm.markAllAsTouched();
+      return;
+    }
+
+    // Validar contra fechas ocupadas ANTES de llamar al backend
+    if (this.formRangeHasConflicts()) {
+      this.toastService.showError('Las fechas seleccionadas incluyen días ocupados. Por favor ajusta el rango.');
+      return;
+    }
+
+    if (!this.bookingLoading) {
       this.bookingLoading = true;
-      
+
       const bookingData = {
         alojamientoId: this.listing.id,
         ...this.bookingForm.value
@@ -343,15 +482,38 @@ export class ListingDetailComponent implements OnInit {
         next: (booking) => {
           this.bookingLoading = false;
           this.toastService.showSuccess('¡Reserva creada exitosamente!');
+
+          //  Actualizar calendario localmente (por si el usuario sigue viendo el detalle)
+          this.loadOccupiedDates(String(this.listing!.id));
+          this.selectedCheckIn = null;
+          this.selectedCheckOut = null;
+          this.bookingForm.reset({
+            checkIn: '',
+            checkOut: '',
+            huespedes: 1
+          });
+
+          // Navegar a la vista de reservas del usuario (lo que ya tenías)
           this.router.navigate(['/reservas']);
         },
         error: (error) => {
           this.bookingLoading = false;
-          this.toastService.showError('Error al crear la reserva');
+
+          // Si el backend manda mensaje específico de no disponible, lo mostramos
+          const msgBackend: string = error?.error?.message || error?.error?.mensaje || '';
+
+          if (msgBackend.includes('no está disponible') || msgBackend.includes('disponible')) {
+            this.toastService.showError('El alojamiento no está disponible para esas fechas. Revisa el calendario.');
+            // Actualizamos por si hubo otra reserva de otro usuario entre tanto
+            this.loadOccupiedDates(String(this.listing!.id));
+          } else {
+            this.toastService.showError('Error al crear la reserva');
+          }
         }
       });
     }
   }
+
 
   getFieldError(fieldName: string): string {
     const field = this.bookingForm.get(fieldName);
@@ -372,37 +534,196 @@ export class ListingDetailComponent implements OnInit {
     return labels[fieldName] || fieldName;
   }
 
-  private generateCalendar(): void {
-    const today = new Date();
-    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-    
-    this.calendarDays = [];
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(today.getFullYear(), today.getMonth(), day);
-      const dateString = date.toISOString().split('T')[0];
-      
-      this.calendarDays.push({
-        day,
-        dateString,
-        isOccupied: this.occupiedDates.includes(dateString),
-        isPast: date < today
+private generateCalendar(): void {
+  const today = new Date();
+  const year = this.currentYear;
+  const month = this.currentMonth;
+
+  const firstDayOfMonth = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  this.calendarDays = [];
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    const dateString = date.toISOString().split('T')[0];
+
+    this.calendarDays.push({
+      day,
+      dateString,
+      isOccupied: this.occupiedDates.includes(dateString),
+      isPast: date < today
+    });
+  }
+}
+
+  onCalendarDayClick(day: any): void {
+    // No permitimos seleccionar pasadas ni ocupadas
+    if (day.isPast || day.isOccupied) return;
+
+    const dateStr: string = day.dateString;
+
+    // 1) Si no hay check-in, o ya hay rango completo, o el nuevo día es antes del inicio → reiniciar rango
+    if (
+      !this.selectedCheckIn ||
+      (this.selectedCheckIn && this.selectedCheckOut) ||
+      dateStr < this.selectedCheckIn
+    ) {
+      this.selectedCheckIn = dateStr;
+      this.selectedCheckOut = null;
+
+      this.bookingForm.patchValue({
+        checkIn: this.selectedCheckIn,
+        checkOut: ''
+      });
+      return;
+    }
+
+    // 2) Si hay check-in y aún no hay check-out, y el día es posterior → fijar check-out
+    if (!this.selectedCheckOut && dateStr > this.selectedCheckIn) {
+
+      //  Validar que el rango no incluya días ocupados
+      if (this.rangeContainsOccupied(this.selectedCheckIn, dateStr)) {
+        this.toastService.showError('No puedes seleccionar un rango que incluya fechas ocupadas');
+        return;
+      }
+
+      this.selectedCheckOut = dateStr;
+
+      this.bookingForm.patchValue({
+        checkIn: this.selectedCheckIn,
+        checkOut: this.selectedCheckOut
       });
     }
   }
 
-  getCalendarDayClasses(day: any): string {
-    const baseClasses = 'h-8 flex items-center justify-center rounded text-xs';
-    
-    if (day.isPast) {
-      return `${baseClasses} bg-gray-100 text-gray-400`;
-    }
-    
-    if (day.isOccupied) {
-      return `${baseClasses} bg-red-100 text-red-600`;
-    }
-    
-    return `${baseClasses} bg-green-100 text-green-600 hover:bg-green-200 cursor-pointer`;
+
+
+getCalendarDayClasses(day: any): string {
+  const base = 'h-8 flex items-center justify-center rounded text-xs';
+
+  if (day.isPast) {
+    return `${base} bg-gray-100 text-gray-400 cursor-not-allowed`;
   }
+
+  if (day.isOccupied) {
+    return `${base} bg-red-100 text-red-600 cursor-not-allowed`;
+  }
+
+  const dateStr = day.dateString;
+  const start = this.selectedCheckIn;
+  const end = this.selectedCheckOut;
+
+  // Día inicio / fin
+  if (start && dateStr === start && !end) {
+    return `${base} bg-primary text-white cursor-pointer`;
+  }
+
+  if (start && end && dateStr === start) {
+    return `${base} bg-primary text-white font-semibold cursor-pointer`;
+  }
+
+  if (start && end && dateStr === end) {
+    return `${base} bg-primary text-white font-semibold cursor-pointer`;
+  }
+
+  // Dentro del rango
+  if (start && end && dateStr > start && dateStr < end) {
+    return `${base} bg-primary/10 text-primary cursor-pointer`;
+  }
+
+  // Día normal seleccionable
+  return `${base} bg-green-100 text-green-600 hover:bg-green-200 cursor-pointer`;
+}
+
+  onSubmitReview(): void {
+    if (!this.isAuthenticated) {
+      this.router.navigate(['/auth/login'], {
+        queryParams: { redirectTo: this.router.url }
+      });
+      return;
+    }
+
+    if (!this.listing) {
+      this.toastService.showError('Alojamiento no cargado');
+      return;
+    }
+
+    if (!this.reservaId) {
+      this.toastService.showError('No se encontró la reserva asociada para valorar');
+      return;
+    }
+
+    if (this.reviewForm.invalid || this.submittingReview) {
+      this.reviewForm.markAllAsTouched();
+      return;
+    }
+
+    this.submittingReview = true;
+
+    const formValue = this.reviewForm.value;
+
+    const payload: CreateReviewRequest = {
+      alojamientoId: this.listing.id,
+      reservaId: this.reservaId,       
+      rating: formValue.rating,
+      texto: formValue.texto
+    };
+
+    this.reviewsService.createReview(payload).subscribe({
+      next: (review: Review) => {
+        this.submittingReview = false;
+        this.toastService.showSuccess('¡Gracias por tu reseña!');
+
+        // meter la nueva reseña en la lista
+        this.reviews = [review, ...this.reviews];
+
+        // recalcular rating promedio
+        if (this.listing) {
+          const total = this.reviews.reduce((acc, r) => acc + r.rating, 0);
+          this.listing.ratingPromedio = total / this.reviews.length;
+        }
+
+        this.reviewForm.reset({ rating: 5, texto: '' });
+      },
+      error: (err) => {
+        console.error(err);
+        this.submittingReview = false;
+        this.toastService.showError('No se pudo enviar la reseña');
+      }
+    });
+  }
+
+    /**
+   * Verifica si el rango [startDateStr, endDateStr] (YYYY-MM-DD)
+   * contiene alguna fecha ocupada.
+   */
+  private rangeContainsOccupied(startDateStr: string, endDateStr: string): boolean {
+    if (!startDateStr || !endDateStr) return false;
+
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+
+    // Normalizamos ocupadas a Date y comprobamos si caen dentro del rango
+    return this.occupiedDates.some(dStr => {
+      const d = new Date(dStr);
+      return d >= start && d <= end;
+    });
+  }
+    /**
+   * Valida que el rango del formulario (checkIn/checkOut) no choque con fechas ocupadas.
+   */
+  private formRangeHasConflicts(): boolean {
+    const checkIn = this.bookingForm.get('checkIn')?.value;
+    const checkOut = this.bookingForm.get('checkOut')?.value;
+
+    if (!checkIn || !checkOut) return false;
+
+    return this.rangeContainsOccupied(checkIn, checkOut);
+  }
+
+
+
 
   formatPrice = formatPrice;
   formatDate = formatDate;

@@ -1,20 +1,25 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
-
+import { GuestsService } from '../../../core/services/guests.service';
 import { HeaderComponent } from '../../../shared/layout/header/header.component';
 import { ButtonComponent } from '../../../shared/ui/button/button.component';
 import { CardComponent } from '../../../shared/ui/card/card.component';
 import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
 import { PaginationComponent } from '../../../shared/ui/pagination/pagination.component';
-
+import { forkJoin, of } from 'rxjs';
+import { switchMap, map, catchError } from 'rxjs/operators';
+import { ListingsService } from '../../../core/services/listings.service';
+import type { Listing } from '../../../core/models/listing.model';
+import { FormsModule } from '@angular/forms';
 import { BookingsService } from '../../../core/services/bookings.service';
 import { ToastService } from '../../../core/services/toast.service';
-
 import { formatPrice, formatDateShort, getDaysDifference } from '../../../core/utils/validation.utils';
 import type { Booking, BookingFilters } from '../../../core/models/booking.model';
+import { ModalComponent } from '../../../shared/ui/modal/modal.component';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../../../environments/environment';
 
-// ✅ Debe coincidir EXACTAMENTE con el @Input() variant del BadgeComponent
 type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | 'error';
 
 @Component({
@@ -23,11 +28,13 @@ type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | '
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     HeaderComponent,
     ButtonComponent,
     CardComponent,
     BadgeComponent,
-    PaginationComponent
+    PaginationComponent,
+    ModalComponent
   ],
   template: `
     <app-header></app-header>
@@ -63,6 +70,21 @@ type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | '
 
           <!-- List view -->
           <div *ngIf="viewMode === 'list'">
+          <!-- encima de <app-card title="Filtros"> -->
+<div class="flex items-center gap-4">
+  <label class="text-sm font-medium text-ink">Alojamiento</label>
+  <select
+    class="px-4 py-3 rounded-xl border border-gray-300 text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+    [(ngModel)]="selectedAccommodationId"
+    (change)="loadBookings()"
+    [ngModelOptions]="{ standalone: true }"
+  >
+    <option *ngFor="let a of myAccommodations" [value]="a.id">
+      {{ a.titulo }}
+    </option>
+  </select>
+</div>
+
             <!-- Filters -->
             <app-card title="Filtros">
               <form [formGroup]="filtersForm" (ngSubmit)="applyFilters()" class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -229,6 +251,34 @@ type BadgeVariant = 'default' | 'secondary' | 'success' | 'warning' | 'info' | '
               </div>
             </app-card>
           </div>
+           <!-- Modal de contacto con el huésped -->
+ <app-modal
+  [isOpen]="showContactModal"
+  title="Datos del huésped"
+  [hasFooter]="true"
+  (closed)="showContactModal = false"
+>
+  <div class="space-y-3" *ngIf="selectedGuest">
+    <p><span class="font-semibold">Nombre:</span> {{ selectedGuest.nombre }}</p>
+    <p><span class="font-semibold">Email:</span> {{ selectedGuest.email }}</p>
+    <p *ngIf="selectedGuest.telefono">
+      <span class="font-semibold">Teléfono:</span> {{ selectedGuest.telefono }}
+    </p>
+  </div>
+
+  <div slot="footer" class="flex justify-end space-x-3">
+    <app-button variant="ghost" (clicked)="showContactModal = false">
+      Cerrar
+    </app-button>
+    <app-button
+      variant="primary"
+      (clicked)="openMailClient(selectedGuest?.email)"
+    >
+      Contactar por email
+    </app-button>
+  </div>
+</app-modal>
+
         </div>
       </div>
     </div>
@@ -239,15 +289,48 @@ export class HostBookingsComponent implements OnInit {
   bookings: Booking[] = [];
   loading = true;
   viewMode: 'list' | 'calendar' = 'list';
-  
+  selectedGuest: { nombre: string; email: string; telefono?: string } | null = null;
+  showContactModal = false;
+  selectedGuestName = '';
+  selectedGuestEmail = '';
+  selectedGuestPhone = '';
+  contactLoading = false;
+
   currentPage = 1;
   pageSize = 10;
   totalResults = 0;
 
+  // alojamientos del host
+  myAccommodations: Listing[] = [];
+  selectedAccommodationId = '';
+  private mapApiToEs(api: string): Booking['estado'] {
+    const m: Record<string, Booking['estado']> = {
+      PENDING: 'PENDIENTE',
+      CONFIRMED: 'CONFIRMADA',
+      PAID: 'CONFIRMADA',
+      CANCELED: 'CANCELADA',
+      COMPLETED: 'COMPLETADA'
+    };
+    return m[api] ?? (api as Booking['estado']);
+  }
+
+  private mapEsToApi(es: string): string | undefined {
+    const m: Record<Booking['estado'], string> = {
+      PENDIENTE: 'PENDING',
+      CONFIRMADA: 'CONFIRMED',
+      CANCELADA: 'CANCELED',
+      COMPLETADA: 'COMPLETED'
+    };
+    return (es as Booking['estado']) in m ? m[es as Booking['estado']] : undefined;
+  }
+
   constructor(
     private fb: FormBuilder,
     private bookingsService: BookingsService,
-    private toastService: ToastService
+    private listingsService: ListingsService,
+    private toastService: ToastService,
+    private guestsService: GuestsService,
+    private http: HttpClient
   ) {
     this.filtersForm = this.fb.group({
       estado: [''],
@@ -257,20 +340,34 @@ export class HostBookingsComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.loadBookings();
+    this.loadMyAccommodations();
+  }
+  loadMyAccommodations(): void {
+    this.listingsService.getHostListings().subscribe({
+      next: (response) => {
+        this.myAccommodations = response.items ?? [];
+        // Si quieres seleccionar el primero por defecto:
+        if (this.myAccommodations.length) {
+          this.selectedAccommodationId = String(this.myAccommodations[0].id);
+          this.loadBookings();
+        } else {
+          this.loading = false;
+        }
+      },
+      error: () => {
+        this.loading = false;
+        this.toastService.showError('No se pudieron cargar tus alojamientos');
+      }
+    });
   }
 
   loadBookings(): void {
+    if (!this.selectedAccommodationId) return;
     this.loading = true;
-    const filters: BookingFilters = {
-      ...this.filtersForm.value,
-      anfitrion: true
-    };
 
-    this.bookingsService.getBookings(filters, this.currentPage, this.pageSize).subscribe({
-      next: (response) => {
-        this.bookings = response.items;
-        this.totalResults = response.total;
+    this.bookingsService.getByAccommodation(this.selectedAccommodationId).subscribe({
+      next: (reservas) => {
+        this.bookings = reservas;
         this.loading = false;
       },
       error: () => {
@@ -279,6 +376,8 @@ export class HostBookingsComponent implements OnInit {
       }
     });
   }
+
+
 
   applyFilters(): void {
     this.currentPage = 1;
@@ -294,14 +393,54 @@ export class HostBookingsComponent implements OnInit {
     this.viewMode = mode;
   }
 
-  confirmBooking(_booking: Booking): void {
-    // Aquí iría la llamada a servicio para confirmar.
-    this.toastService.showSuccess('Reserva confirmada');
+  confirmBooking(booking: Booking): void {
+    this.bookingsService.changeState(booking.id, 'CONFIRMED').subscribe({
+      next: () => {
+        this.toastService.showSuccess('Reserva confirmada');
+        this.loadBookings();
+      },
+      error: () => {
+        this.toastService.showError('No se pudo confirmar la reserva');
+      }
+    });
   }
 
-  contactGuest(_booking: Booking): void {
-    this.toastService.showInfo('Función de contacto no implementada');
+  contactGuestData: { nombre: string; email: string; telefono?: string } | null = null;
+  contactGuest(booking: Booking): void {
+  if (!booking.usuarioId) {
+    this.toastService.showInfo('No hay ID de huésped en la reserva');
+    return;
   }
+
+  this.contactLoading = true;
+
+  this.http.get<any>(`${environment.apiBaseUrl}/guests/${booking.usuarioId}`).subscribe({
+    next: (guest) => {
+      this.contactLoading = false;
+
+      this.selectedGuest = {
+        nombre: guest.name,
+        email: guest.email,
+        telefono: guest.phone
+      };
+
+      this.showContactModal = true;
+    },
+    error: () => {
+      this.contactLoading = false;
+      this.toastService.showError('No se pudieron cargar los datos del huésped');
+    }
+  });
+}
+openMailClient(email?: string | null): void {
+  if (!email) {
+    this.toastService.showInfo('El huésped no tiene email disponible');
+    return;
+  }
+  window.location.href = `mailto:${email}`;
+}
+
+
 
   calculateTotal(booking: Booking): string {
     const nights = getDaysDifference(booking.checkIn, booking.checkOut);
@@ -319,6 +458,7 @@ export class HostBookingsComponent implements OnInit {
     return variants[estado] ?? 'default';
   }
 
+
   getStatusText(estado: Booking['estado']): string {
     const texts: Record<Booking['estado'], string> = {
       PENDIENTE: 'Pendiente',
@@ -328,6 +468,13 @@ export class HostBookingsComponent implements OnInit {
     };
     return texts[estado] || estado;
   }
+  openEmail(): void {
+  if (this.selectedGuestEmail) {
+    window.location.href = `mailto:${this.selectedGuestEmail}`;
+  }
+}
+
+
 
   // Exponer utils al template
   formatPrice = formatPrice;

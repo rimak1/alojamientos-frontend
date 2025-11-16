@@ -11,6 +11,7 @@ import { ListingsService } from '../../../core/services/listings.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { formatPrice } from '../../../core/utils/validation.utils';
 import type { Listing } from '../../../core/models/listing.model';
+import { PaginationComponent } from '../../../shared/ui/pagination/pagination.component';
 
 @Component({
   selector: 'app-host-listings',
@@ -23,7 +24,8 @@ import type { Listing } from '../../../core/models/listing.model';
     CardComponent,
     BadgeComponent,
     StarRatingComponent,
-    ModalComponent
+    ModalComponent,
+    PaginationComponent
   ],
   template: `
     <app-header></app-header>
@@ -62,8 +64,9 @@ import type { Listing } from '../../../core/models/listing.model';
         </div>
 
         <!-- Listings grid -->
-        <div *ngIf="!loading && listings.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          <app-card *ngFor="let listing of listings" class="group">
+<div *ngIf="!loading && listings.length > 0" class="space-y-6">
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+    <app-card *ngFor="let listing of listings" class="group">
             <div class="space-y-4">
               <!-- Image -->
               <div class="aspect-video w-full overflow-hidden rounded-xl bg-gray-200 relative">
@@ -133,7 +136,14 @@ import type { Listing } from '../../../core/models/listing.model';
                 </div>
               </div>
             </div>
+
           </app-card>
+                        <app-pagination
+    [currentPage]="currentPage"
+    [pageSize]="pageSize"
+    [total]="totalResults"
+    (pageChange)="onPageChange($event)"
+  ></app-pagination>
         </div>
 
         <!-- Empty state -->
@@ -195,23 +205,48 @@ export class HostListingsComponent implements OnInit {
   deleteLoading = false;
   listingToDelete: Listing | null = null;
 
+  currentPage = 1;
+  pageSize = 6;     
+  totalResults = 0;
+
   constructor(
     public router: Router,
     private listingsService: ListingsService,
     private toastService: ToastService
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadListings();
   }
 
-  loadListings(): void {
+  loadListings(page: number = this.currentPage): void {
     this.loading = true;
-    this.listingsService.getHostListings().subscribe(listings => {
-      this.listings = listings.filter(listing => listing.estado !== 'ELIMINADO');
-      this.loading = false;
+
+    this.listingsService.getHostListings(page, this.pageSize).subscribe({
+      next: (response) => {
+        const items = response.items || [];
+        this.listings = items.filter(l => l.estado !== 'ELIMINADO');
+
+        this.currentPage = response.page;
+        this.pageSize = response.pageSize;
+        this.totalResults = response.total;
+
+        this.loading = false;
+      },
+      error: () => {
+        this.listings = [];
+        this.totalResults = 0;
+        this.loading = false;
+      }
     });
   }
+
+    onPageChange(page: number): void {
+    this.currentPage = page;
+    this.loadListings(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
 
   viewListing(id: string): void {
     this.router.navigate(['/alojamientos', id]);
@@ -229,7 +264,7 @@ export class HostListingsComponent implements OnInit {
   deleteListing(): void {
     if (this.listingToDelete && !this.deleteLoading) {
       this.deleteLoading = true;
-      
+
       this.listingsService.deleteListing(this.listingToDelete.id).subscribe({
         next: () => {
           this.deleteLoading = false;
